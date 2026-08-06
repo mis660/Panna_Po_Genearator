@@ -1,6 +1,3 @@
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,6 +6,7 @@
 <title>Panna Jewellers Exclusive — PO Generator</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root {
     --emerald-900:#0B3527; --emerald-800:#0F4C3A; --emerald-700:#166247; --emerald-100:#DCEAE3;
@@ -89,7 +87,7 @@
     <h2>Recent Purchase Orders</h2>
     <p style="color:var(--ink-500); font-size:14px; margin-bottom:20px;">All generated POs across departments.</p>
     <table>
-      <thead><tr><th>PO Number</th><th>Date</th><th>Department</th><th>Vendor</th><th>Total Value</th></tr></thead>
+      <thead><tr><th>PO Number</th><th>Date</th><th>Department</th><th>Vendor</th><th>Total Value</th><th></th></tr></thead>
       <tbody id="po-list"></tbody>
     </table>
   </div>
@@ -167,6 +165,7 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 let DEPARTMENTS = [];
 let VENDORS = [];
+window.allPOs = []; // Store POs globally for the PDF downloader
 
 // ==========================================
 // 2. AUTHENTICATION & NAVIGATION
@@ -222,6 +221,8 @@ async function loadData() {
 
   // Load Dashboard POs
   const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name, phone, gstin)').order('created_at', { ascending: false });
+  window.allPOs = pos || []; // Save globally so the PDF function can access them securely
+  
   document.getElementById('po-list').innerHTML = (pos||[]).map(po => `
     <tr>
       <td class="mono" style="font-weight:bold; color:var(--emerald-800);">${po.po_number}</td>
@@ -230,13 +231,13 @@ async function loadData() {
       <td>${po.po_vendors ? po.po_vendors.name : 'Unknown'}</td>
       <td>₹ ${po.grand_total.toLocaleString()}</td>
       <td>
-        <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" onclick='downloadPDF(${JSON.stringify(po)})'>
+        <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" onclick="downloadPDF('${po.id}')">
           Download PDF
         </button>
       </td>
     </tr>
   `).join('');
-
+} // <-- This closing bracket was missing!
 
 // ==========================================
 // 4. ADMIN FUNCTIONS
@@ -290,7 +291,6 @@ function calcRow(el) {
   const w = parseFloat(row.querySelector('.i-weight').value) || 0;
   const q = parseFloat(row.querySelector('.i-qty').value) || 0;
   const r = parseFloat(row.querySelector('.i-rate').value) || 0;
-  // Calculation: Weight * Quantity * Rate (Adjust this math based on your exact business need)
   const total = w > 0 ? (w * q * r) : (q * r); 
   row.querySelector('.i-total').value = total.toFixed(2);
   calcTotals();
@@ -319,7 +319,6 @@ async function generatePO() {
 
   if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
 
-  // Gather Line Items
   const items = [];
   document.querySelectorAll('.po-item-row').forEach(row => {
     items.push({
@@ -334,13 +333,11 @@ async function generatePO() {
 
   if(items.length === 0 || items[0].name === "") return alert("Add at least one item.");
 
-  // Auto-Generate PO Number: Check how many POs exist for this department
   const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
   
-  const seqNumber = String((count || 0) + 1).padStart(4, '0'); // Turns 1 into 0001
+  const seqNumber = String((count || 0) + 1).padStart(4, '0'); 
   const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
 
-  // Save to Database
   const { error } = await supabaseClient.from('purchase_orders').insert({
     po_number: finalPONumber,
     department_code: deptCode,
@@ -356,19 +353,23 @@ async function generatePO() {
     alert("Error creating PO: " + error.message);
   } else {
     alert(`Success! Purchase Order ${finalPONumber} generated.`);
-    document.getElementById('po-items-body').innerHTML = ''; // clear form
+    document.getElementById('po-items-body').innerHTML = ''; 
     addPORow();
-    loadData(); // refresh dashboard
+    loadData(); 
     switchTab('tab-dashboard');
   }
 }
+
 // ==========================================
 // 6. PDF GENERATION
 // ==========================================
-function downloadPDF(po) {
-  // 1. Build a hidden, beautifully formatted HTML template for the PDF
+function downloadPDF(poId) {
+  // Find the exact PO from the global array
+  const po = window.allPOs.find(p => p.id === poId);
+  if(!po) return alert("Error finding PO data.");
+
   const invoiceHTML = `
-    <div id="invoice-template" style="padding: 40px; font-family: 'Inter', sans-serif; color: #1B1B18;">
+    <div id="invoice-template" style="padding: 40px; font-family: 'Inter', sans-serif; color: #1B1B18; width: 800px; background: white;">
       <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #0F4C3A; padding-bottom: 20px; margin-bottom: 30px;">
         <div>
           <h1 style="margin: 0; color: #0F4C3A; font-family: 'Playfair Display', serif; font-size: 28px;">Panna Jewellers Exclusive</h1>
@@ -399,41 +400,41 @@ function downloadPDF(po) {
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
         <thead>
           <tr style="background: #0F4C3A; color: #FAF7EF; text-align: left;">
-            <th style="padding: 12px;">Item Description</th>
-            <th style="padding: 12px;">Purity</th>
-            <th style="padding: 12px;">Weight</th>
-            <th style="padding: 12px;">Qty</th>
-            <th style="padding: 12px;">Rate</th>
-            <th style="padding: 12px; text-align: right;">Total</th>
+            <th style="padding: 12px; border:none; color:white;">Item Description</th>
+            <th style="padding: 12px; border:none; color:white;">Purity</th>
+            <th style="padding: 12px; border:none; color:white;">Weight</th>
+            <th style="padding: 12px; border:none; color:white;">Qty</th>
+            <th style="padding: 12px; border:none; color:white;">Rate</th>
+            <th style="padding: 12px; text-align: right; border:none; color:white;">Total</th>
           </tr>
         </thead>
         <tbody>
           ${po.items.map(item => `
             <tr style="border-bottom: 1px solid #E4DCC8;">
-              <td style="padding: 12px;">${item.name}</td>
-              <td style="padding: 12px;">${item.purity || '-'}</td>
-              <td style="padding: 12px;">${item.weight}</td>
-              <td style="padding: 12px;">${item.qty}</td>
-              <td style="padding: 12px;">₹${item.rate}</td>
-              <td style="padding: 12px; text-align: right; font-weight: bold;">₹${item.total}</td>
+              <td style="padding: 12px; border:none;">${item.name}</td>
+              <td style="padding: 12px; border:none;">${item.purity || '-'}</td>
+              <td style="padding: 12px; border:none;">${item.weight}</td>
+              <td style="padding: 12px; border:none;">${item.qty}</td>
+              <td style="padding: 12px; border:none;">₹${item.rate}</td>
+              <td style="padding: 12px; text-align: right; font-weight: bold; border:none;">₹${item.total}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
 
       <div style="display: flex; justify-content: flex-end;">
-        <table style="width: 300px; border-collapse: collapse;">
+        <table style="width: 300px; border-collapse: collapse; border:none;">
           <tr>
-            <td style="padding: 8px; font-size: 14px;">Subtotal:</td>
-            <td style="padding: 8px; text-align: right; font-size: 14px;">₹${po.subtotal}</td>
+            <td style="padding: 8px; font-size: 14px; border:none;">Subtotal:</td>
+            <td style="padding: 8px; text-align: right; font-size: 14px; border:none;">₹${po.subtotal}</td>
           </tr>
           <tr>
-            <td style="padding: 8px; font-size: 14px;">GST:</td>
-            <td style="padding: 8px; text-align: right; font-size: 14px;">${po.gst}%</td>
+            <td style="padding: 8px; font-size: 14px; border:none;">GST:</td>
+            <td style="padding: 8px; text-align: right; font-size: 14px; border:none;">${po.gst}%</td>
           </tr>
           <tr style="border-top: 2px solid #0F4C3A;">
-            <td style="padding: 12px; font-weight: bold; font-size: 16px;">Grand Total:</td>
-            <td style="padding: 12px; text-align: right; font-weight: bold; font-size: 18px; color: #0F4C3A;">₹${po.grand_total}</td>
+            <td style="padding: 12px; font-weight: bold; font-size: 16px; border:none;">Grand Total:</td>
+            <td style="padding: 12px; text-align: right; font-weight: bold; font-size: 18px; color: #0F4C3A; border:none;">₹${po.grand_total}</td>
           </tr>
         </table>
       </div>
@@ -445,14 +446,15 @@ function downloadPDF(po) {
     </div>
   `;
 
-  // 2. Put the hidden template on the screen temporarily
   const container = document.createElement('div');
   container.innerHTML = invoiceHTML;
+  // Position it off-screen so the user doesn't see it flash while generating
+  container.style.position = 'absolute';
+  container.style.top = '-9999px';
   document.body.appendChild(container);
 
-  // 3. Tell html2pdf to convert it and download it
   const opt = {
-    margin:       0,
+    margin:       0.5,
     filename:     `${po.po_number}.pdf`,
     image:        { type: 'jpeg', quality: 0.98 },
     html2canvas:  { scale: 2 },
@@ -460,7 +462,6 @@ function downloadPDF(po) {
   };
 
   html2pdf().set(opt).from(container.firstElementChild).save().then(() => {
-    // 4. Remove the temporary HTML once the download finishes
     document.body.removeChild(container);
   });
 }
