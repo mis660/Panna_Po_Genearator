@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panna Jewellers Exclusive — PO Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --emerald-900:#0B3527; --emerald-800:#0F4C3A; --emerald-700:#166247; --emerald-100:#DCEAE3;
+    --gold-600:#B8912A; --gold-500:#C9A227; --gold-300:#E4C868; --ivory-50:#FAF7EF; --ivory-100:#F2EDE0;
+    --ink-900:#1B1B18; --ink-500:#6B6558; --line:#E4DCC8;
+  }
+  * { box-sizing:border-box; font-family:'Inter',sans-serif; }
+  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; }
+  h1,h2,h3 { font-family:'Playfair Display',serif; margin:0; }
+  .mono { font-family:'JetBrains Mono',monospace; }
+  
+  /* Topbar */
+  .topbar { background:linear-gradient(120deg, var(--emerald-900), var(--emerald-800)); color:var(--ivory-50); padding:16px 26px; display:flex; justify-content:space-between; align-items:center; }
+  .topbar h1 { font-size:20px; color:var(--ivory-50); }
+  .topbar .sub { font-size:11px; color:var(--gold-300); text-transform:uppercase; letter-spacing:1.5px; }
+  
+  /* Tabs */
+  .tabs { display:flex; gap:6px; padding:14px 26px 0; background:var(--ivory-100); border-bottom:1px solid var(--line); }
+  .tab { padding:10px 16px; border-radius:8px 8px 0 0; cursor:pointer; font-size:13.5px; font-weight:600; color:var(--ink-500); }
+  .tab.active { background:var(--ivory-50); color:var(--emerald-800); border:1px solid var(--line); border-bottom:none; position:relative; top:1px; }
+  
+  .content { padding:26px; max-width:1200px; margin:0 auto; display:none; }
+  .content.active { display:block; }
+  
+  /* Forms & Cards */
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:24px; margin-bottom:24px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  .field { margin-bottom:16px; }
+  .field label { display:block; font-size:12px; font-weight:600; color:var(--ink-500); text-transform:uppercase; margin-bottom:6px; }
+  input, select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:14px; background:#fff; }
+  input:focus, select:focus { outline:2px solid var(--gold-500); border-color:var(--gold-500); }
+  
+  .btn { padding:10px 18px; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:14px; display:inline-flex; align-items:center; gap:8px; }
+  .btn-primary { background:var(--emerald-800); color:var(--gold-300); }
+  .btn-gold { background:var(--gold-500); color:#fff; }
+  .btn-danger { background:#B5502D; color:#fff; }
+  
+  /* Tables */
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--line); }
+  th { background:var(--emerald-900); color:var(--ivory-50); text-align:left; padding:12px; font-size:12px; text-transform:uppercase; }
+  td { padding:12px; border-top:1px solid var(--line); font-size:14px; }
+  
+  /* Login Screen */
+  #login-screen { position:fixed; inset:0; background:var(--ivory-50); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .login-box { background:#fff; padding:40px; border-radius:12px; border:1px solid var(--line); width:100%; max-width:400px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.05); }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <h2 style="color:var(--emerald-900); margin-bottom:5px;">Panna Jewellers</h2>
+    <p style="color:var(--gold-500); font-size:12px; text-transform:uppercase; margin-bottom:24px;">PO Generator Desk</p>
+    <div class="field" style="text-align:left;"><label>Username</label><input type="text" id="login-user"></div>
+    <div class="field" style="text-align:left;"><label>Password</label><input type="password" id="login-pass"></div>
+    <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="login()">Sign In</button>
+  </div>
+</div>
+
+<!-- APP SHELL -->
+<div id="app" style="display:none;">
+  <div class="topbar">
+    <div><h1>Panna Jewellers Exclusive</h1><div class="sub">Purchase Order System</div></div>
+    <div id="user-badge" style="font-size:14px; font-weight:600;"></div>
+  </div>
+  
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('tab-dashboard')">Dashboard</div>
+    <div class="tab" onclick="switchTab('tab-create-po')">Create PO</div>
+    <div class="tab" id="admin-tab" onclick="switchTab('tab-admin')" style="display:none;">Admin Control</div>
+    <div class="tab" onclick="logout()" style="margin-left:auto; color:#B5502D;">Log Out</div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div class="content active" id="tab-dashboard">
+    <h2>Recent Purchase Orders</h2>
+    <p style="color:var(--ink-500); font-size:14px; margin-bottom:20px;">All generated POs across departments.</p>
+    <table>
+      <thead><tr><th>PO Number</th><th>Date</th><th>Department</th><th>Vendor</th><th>Total Value</th></tr></thead>
+      <tbody id="po-list"></tbody>
+    </table>
+  </div>
+
+  <!-- CREATE PO -->
+  <div class="content" id="tab-create-po">
+    <h2>Create New Purchase Order</h2>
+    <div class="card" style="margin-top:20px;">
+      <div class="grid-2">
+        <div class="field"><label>Department</label><select id="po-dept"></select></div>
+        <div class="field"><label>Vendor</label><select id="po-vendor"></select></div>
+      </div>
+      
+      <h3 style="margin:20px 0 10px; font-size:16px;">Line Items</h3>
+      <table style="margin-bottom:15px;">
+        <thead><tr><th>Item / Specification</th><th>Purity</th><th>Weight (g/ct)</th><th>Qty</th><th>Rate</th><th>Total</th><th></th></tr></thead>
+        <tbody id="po-items-body"></tbody>
+      </table>
+      <button class="btn btn-gold" onclick="addPORow()">+ Add Item Row</button>
+      
+      <div style="margin-top:30px; border-top:1px solid var(--line); padding-top:20px; text-align:right;">
+        <div class="field"><label style="display:inline-block; width:100px;">Subtotal (₹)</label><input type="number" id="po-subtotal" readonly style="width:200px; background:var(--ivory-50);"></div>
+        <div class="field"><label style="display:inline-block; width:100px;">GST %</label><input type="number" id="po-gst" value="3" onchange="calculateGrandTotal()" style="width:200px;"></div>
+        <div class="field"><label style="display:inline-block; width:100px;">Grand Total (₹)</label><input type="number" id="po-grandtotal" readonly style="width:200px; background:var(--emerald-100); color:var(--emerald-900); font-weight:bold;"></div>
+        <button class="btn btn-primary" style="margin-top:20px;" onclick="generatePO()">Generate Official PO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADMIN CONTROL -->
+  <div class="content" id="tab-admin">
+    <div class="grid-2">
+      <!-- DEPARTMENTS -->
+      <div class="card">
+        <h2 style="margin-bottom:15px;">Manage Departments</h2>
+        <div class="field"><label>Department Name</label><input id="new-dept-name" placeholder="e.g. Gold Jewellery"></div>
+        <div class="field"><label>PO Code Prefix</label><input id="new-dept-code" placeholder="e.g. GOLD (Makes PJE_GOLD_PO_001)"></div>
+        <button class="btn btn-primary" onclick="addDepartment()">Add Department</button>
+        <table style="margin-top:20px;"><thead><tr><th>Name</th><th>Code</th></tr></thead><tbody id="dept-list"></tbody></table>
+      </div>
+      <!-- VENDORS -->
+      <div class="card">
+        <h2 style="margin-bottom:15px;">Manage Vendors</h2>
+        <div class="field"><label>Vendor Name</label><input id="new-ven-name"></div>
+        <div class="grid-2">
+          <div class="field"><label>Phone</label><input id="new-ven-phone"></div>
+          <div class="field"><label>GSTIN</label><input id="new-ven-gstin"></div>
+        </div>
+        <button class="btn btn-primary" onclick="addVendor()">Add Vendor</button>
+        <table style="margin-top:20px;"><thead><tr><th>Vendor</th><th>GSTIN</th></tr></thead><tbody id="ven-list"></tbody></table>
+      </div>
+    </div>
+    <!-- USERS -->
+    <div class="card">
+      <h2 style="margin-bottom:15px;">Manage Users</h2>
+      <div class="grid-3">
+        <div class="field"><label>Name</label><input id="new-u-name"></div>
+        <div class="field"><label>Username</label><input id="new-u-user"></div>
+        <div class="field"><label>Password</label><input type="text" id="new-u-pass"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addUser()">Create User</button>
+      <table style="margin-top:20px;"><thead><tr><th>Name</th><th>Username</th><th>Role</th></tr></thead><tbody id="user-list"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==========================================
+// 1. SUPABASE CREDENTIALS INTEGRATED
+// ==========================================
+const SUPABASE_URL = "https://zgaprxfnzzkoqyjdyysn.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYXByeGZuenprb3F5amR5eXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5MTc2MjQsImV4cCI6MjEwMTQ5MzYyNH0.-LPM2g8jYgVlcgY0uSK1EcZ8LBFsYrZqpez_JML26MQ";
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null;
+let DEPARTMENTS = [];
+let VENDORS = [];
+
+// ==========================================
+// 2. AUTHENTICATION & NAVIGATION
+// ==========================================
+async function login() {
+  const u = document.getElementById('login-user').value;
+  const p = document.getElementById('login-pass').value;
+  const { data } = await supabaseClient.from('po_users').select('*').eq('username', u).eq('password', p).single();
+  
+  if (data) {
+    currentUser = data;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('user-badge').innerText = `${data.name} (${data.role.toUpperCase()})`;
+    if(data.role === 'admin') document.getElementById('admin-tab').style.display = 'block';
+    loadData();
+    addPORow(); // Setup initial PO row
+  } else {
+    alert("Invalid login.");
+  }
+}
+
+function logout() { location.reload(); }
+
+function switchTab(tabId) {
+  document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ==========================================
+// 3. LOAD CORE DATA
+// ==========================================
+async function loadData() {
+  // Load Departments
+  const { data: depts } = await supabaseClient.from('po_departments').select('*').order('name');
+  DEPARTMENTS = depts || [];
+  document.getElementById('po-dept').innerHTML = DEPARTMENTS.map(d => `<option value="${d.code}">${d.name} (${d.code})</option>`).join('');
+  document.getElementById('dept-list').innerHTML = DEPARTMENTS.map(d => `<tr><td>${d.name}</td><td class="mono">${d.code}</td></tr>`).join('');
+
+  // Load Vendors
+  const { data: vens } = await supabaseClient.from('po_vendors').select('*').order('name');
+  VENDORS = vens || [];
+  document.getElementById('po-vendor').innerHTML = VENDORS.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+  document.getElementById('ven-list').innerHTML = VENDORS.map(v => `<tr><td>${v.name}</td><td>${v.gstin || '-'}</td></tr>`).join('');
+
+  // Load Users (Admin only)
+  if (currentUser.role === 'admin') {
+    const { data: users } = await supabaseClient.from('po_users').select('*');
+    document.getElementById('user-list').innerHTML = (users||[]).map(u => `<tr><td>${u.name}</td><td>${u.username}</td><td>${u.role}</td></tr>`).join('');
+  }
+
+  // Load Dashboard POs
+  const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name)').order('created_at', { ascending: false });
+  document.getElementById('po-list').innerHTML = (pos||[]).map(po => `
+    <tr>
+      <td class="mono" style="font-weight:bold; color:var(--emerald-800);">${po.po_number}</td>
+      <td>${new Date(po.created_at).toLocaleDateString()}</td>
+      <td>${po.department_code}</td>
+      <td>${po.po_vendors ? po.po_vendors.name : 'Unknown'}</td>
+      <td>₹ ${po.grand_total.toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+// ==========================================
+// 4. ADMIN FUNCTIONS
+// ==========================================
+async function addDepartment() {
+  const name = document.getElementById('new-dept-name').value;
+  const code = document.getElementById('new-dept-code').value.toUpperCase().replace(/\s/g, '');
+  if(!name || !code) return alert("Fill all fields");
+  await supabaseClient.from('po_departments').insert({ name, code });
+  alert("Department Added!"); loadData();
+}
+
+async function addVendor() {
+  const name = document.getElementById('new-ven-name').value;
+  const phone = document.getElementById('new-ven-phone').value;
+  const gstin = document.getElementById('new-ven-gstin').value;
+  if(!name) return alert("Name is required");
+  await supabaseClient.from('po_vendors').insert({ name, phone, gstin });
+  alert("Vendor Added!"); loadData();
+}
+
+async function addUser() {
+  const name = document.getElementById('new-u-name').value;
+  const username = document.getElementById('new-u-user').value;
+  const password = document.getElementById('new-u-pass').value;
+  if(!name || !username || !password) return alert("Fill all fields");
+  await supabaseClient.from('po_users').insert({ name, username, password, role:'creator' });
+  alert("User Added!"); loadData();
+}
+
+// ==========================================
+// 5. PO GENERATOR LOGIC
+// ==========================================
+function addPORow() {
+  const tr = document.createElement('tr');
+  tr.className = 'po-item-row';
+  tr.innerHTML = `
+    <td><input type="text" class="i-name" placeholder="Item Name"></td>
+    <td><input type="text" class="i-purity" placeholder="e.g. 22K"></td>
+    <td><input type="number" class="i-weight" value="0" onchange="calcRow(this)"></td>
+    <td><input type="number" class="i-qty" value="1" onchange="calcRow(this)"></td>
+    <td><input type="number" class="i-rate" value="0" onchange="calcRow(this)"></td>
+    <td><input type="number" class="i-total" readonly style="background:var(--ivory-50);"></td>
+    <td><button class="btn btn-danger" style="padding:8px;" onclick="this.closest('tr').remove(); calcTotals();">X</button></td>
+  `;
+  document.getElementById('po-items-body').appendChild(tr);
+}
+
+function calcRow(el) {
+  const row = el.closest('tr');
+  const w = parseFloat(row.querySelector('.i-weight').value) || 0;
+  const q = parseFloat(row.querySelector('.i-qty').value) || 0;
+  const r = parseFloat(row.querySelector('.i-rate').value) || 0;
+  // Calculation: Weight * Quantity * Rate (Adjust this math based on your exact business need)
+  const total = w > 0 ? (w * q * r) : (q * r); 
+  row.querySelector('.i-total').value = total.toFixed(2);
+  calcTotals();
+}
+
+function calcTotals() {
+  let sub = 0;
+  document.querySelectorAll('.i-total').forEach(inp => sub += parseFloat(inp.value) || 0);
+  document.getElementById('po-subtotal').value = sub.toFixed(2);
+  calculateGrandTotal();
+}
+
+function calculateGrandTotal() {
+  const sub = parseFloat(document.getElementById('po-subtotal').value) || 0;
+  const gst = parseFloat(document.getElementById('po-gst').value) || 0;
+  const grand = sub + (sub * (gst / 100));
+  document.getElementById('po-grandtotal').value = grand.toFixed(2);
+}
+
+async function generatePO() {
+  const deptCode = document.getElementById('po-dept').value;
+  const vendorId = document.getElementById('po-vendor').value;
+  const subtotal = document.getElementById('po-subtotal').value;
+  const gst = document.getElementById('po-gst').value;
+  const grandTotal = document.getElementById('po-grandtotal').value;
+
+  if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
+
+  // Gather Line Items
+  const items = [];
+  document.querySelectorAll('.po-item-row').forEach(row => {
+    items.push({
+      name: row.querySelector('.i-name').value,
+      purity: row.querySelector('.i-purity').value,
+      weight: row.querySelector('.i-weight').value,
+      qty: row.querySelector('.i-qty').value,
+      rate: row.querySelector('.i-rate').value,
+      total: row.querySelector('.i-total').value
+    });
+  });
+
+  if(items.length === 0 || items[0].name === "") return alert("Add at least one item.");
+
+  // Auto-Generate PO Number: Check how many POs exist for this department
+  const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
+  
+  const seqNumber = String((count || 0) + 1).padStart(4, '0'); // Turns 1 into 0001
+  const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
+
+  // Save to Database
+  const { error } = await supabaseClient.from('purchase_orders').insert({
+    po_number: finalPONumber,
+    department_code: deptCode,
+    vendor_id: vendorId,
+    items: items,
+    subtotal: subtotal,
+    gst: gst,
+    grand_total: grandTotal,
+    created_by: currentUser.name
+  });
+
+  if (error) {
+    alert("Error creating PO: " + error.message);
+  } else {
+    alert(`Success! Purchase Order ${finalPONumber} generated.`);
+    document.getElementById('po-items-body').innerHTML = ''; // clear form
+    addPORow();
+    loadData(); // refresh dashboard
+    switchTab('tab-dashboard');
+  }
+}
+</script>
+</body>
+</html>
