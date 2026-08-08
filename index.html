@@ -14,7 +14,7 @@
     --ink-900:#1B1B18; --ink-500:#6B6558; --line:#E4DCC8;
   }
   * { box-sizing:border-box; font-family:'Inter',sans-serif; }
-  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; position:relative; }
+  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; overflow-x:hidden; }
   h1,h2,h3 { font-family:'Playfair Display',serif; margin:0; }
   .mono { font-family:'JetBrains Mono',monospace; }
   
@@ -614,7 +614,7 @@ async function generatePO() {
 }
 
 // ==========================================
-// 8. DYNAMIC PDF GENERATION (ABSOLUTE DOM ATTACHMENT FIX)
+// 8. DYNAMIC PDF GENERATION (PERFECT FIT)
 // ==========================================
 function downloadPDF(btnElement) {
   try {
@@ -661,15 +661,13 @@ function downloadPDF(btnElement) {
         </div>`;
     }
 
-    // CREATE CONTAINER & ATTACH TO BODY
+    // CREATE CONTAINER & ATTACH TO BODY AT +2000px RIGHT
     const container = document.createElement('div');
-    // Hide it underneath the UI, but securely attach it to the DOM at A4 width so no clipping occurs
     container.style.position = 'absolute';
     container.style.top = '0';
-    container.style.left = '0';
-    container.style.width = '794px';
-    container.style.zIndex = '-9999';
-    container.style.background = '#ffffff';
+    container.style.left = '2000px'; // Prevent negative origin crop!
+    container.style.width = '794px'; // Strict A4 Width
+    container.style.backgroundColor = '#ffffff';
 
     container.innerHTML = `
       <div style="padding:40px; font-family:sans-serif; width:100%; box-sizing:border-box;">
@@ -711,13 +709,13 @@ function downloadPDF(btnElement) {
       </div>
     `;
 
-    document.body.appendChild(container); // Absolutely crucial to prevent negative coordinate clipping
+    document.body.appendChild(container); // Absolutely crucial for proper html2canvas rendering
 
     const opt = {
       margin:       0.2, 
       filename:     `${po.po_number}.pdf`,
       image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 },
+      html2canvas:  { scale: 2, useCORS: true },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
