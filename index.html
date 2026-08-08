@@ -14,7 +14,7 @@
     --ink-900:#1B1B18; --ink-500:#6B6558; --line:#E4DCC8;
   }
   * { box-sizing:border-box; font-family:'Inter',sans-serif; }
-  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; overflow-x:hidden; }
+  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; position:relative; }
   h1,h2,h3 { font-family:'Playfair Display',serif; margin:0; }
   .mono { font-family:'JetBrains Mono',monospace; }
   
@@ -77,7 +77,7 @@
   </div>
 </div>
 
-<!-- MANAGE PO MODAL (RECEIVING & PAYMENT) -->
+<!-- MANAGE PO MODAL -->
 <div id="manage-modal" class="overlay" style="display:none;">
   <div class="modal-box">
     <h2 style="margin-bottom:15px; color:var(--emerald-900);">Manage PO: <span id="manage-po-num"></span></h2>
@@ -255,13 +255,11 @@ async function loadData() {
   const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name)').order('created_at', { ascending: false });
   document.getElementById('po-list').innerHTML = (pos||[]).map(po => {
     
-    // Status badges
     let badgeClass = 'badge approved';
     if(po.approval_status === 'Pending') badgeClass = 'badge pending';
     if(po.approval_status === 'Rejected') badgeClass = 'badge rejected';
     if(po.po_status === 'Closed') badgeClass = 'badge closed';
     
-    // Status coloring
     const statusColor = po.po_status === 'Closed' ? '#383d41' : '#0f5132';
     const payColor = po.payment_status === 'Paid' ? '#0f5132' : '#856404';
     
@@ -272,13 +270,11 @@ async function loadData() {
     
     const encodedPO = encodeURIComponent(JSON.stringify(po)); 
     
-    // Base action buttons
     let actionButtons = `
       <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="downloadPDF(this)">PDF</button>
       <button class="btn btn-gold" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="openManageModal(this)">Manage</button>
     `;
 
-    // Only show Approve/Reject to ADMINS if the PO is PENDING
     if (po.approval_status === 'Pending' && currentUser.role === 'admin') {
       actionButtons += `
         <button class="btn btn-success" style="padding:6px 12px; font-size:12px;" onclick="approvePO('${po.id}')">Approve</button>
@@ -295,11 +291,7 @@ async function loadData() {
         <td>₹ ${po.grand_total ? po.grand_total.toLocaleString() : '0'}</td>
         <td><span class="${badgeClass}">${po.approval_status || 'N/A'}</span></td>
         <td style="font-size:11px; line-height:1.4;">${trackingStr}</td>
-        <td>
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            ${actionButtons}
-          </div>
-        </td>
+        <td><div style="display:flex; gap:6px; flex-wrap:wrap;">${actionButtons}</div></td>
       </tr>
     `;
   }).join('');
@@ -310,32 +302,17 @@ async function loadData() {
 // ==========================================
 async function approvePO(poId) {
   if (!confirm("Are you sure you want to officially APPROVE this Purchase Order?")) return;
-  
   const signatureUrl = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png';
-  
-  const { error } = await supabaseClient.from('purchase_orders')
-    .update({ approval_status: 'Manual-Approved', approver_signature: signatureUrl })
-    .eq('id', poId);
-    
+  const { error } = await supabaseClient.from('purchase_orders').update({ approval_status: 'Manual-Approved', approver_signature: signatureUrl }).eq('id', poId);
   if (error) alert("Error updating PO: " + error.message);
-  else {
-    alert("PO Successfully Approved!");
-    loadData(); 
-  }
+  else { alert("PO Successfully Approved!"); loadData(); }
 }
 
 async function rejectPO(poId) {
   if (!confirm("Are you sure you want to REJECT this Purchase Order?")) return;
-  
-  const { error } = await supabaseClient.from('purchase_orders')
-    .update({ approval_status: 'Rejected', po_status: 'Closed' }) 
-    .eq('id', poId);
-    
+  const { error } = await supabaseClient.from('purchase_orders').update({ approval_status: 'Rejected', po_status: 'Closed' }).eq('id', poId);
   if (error) alert("Error rejecting PO: " + error.message);
-  else {
-    alert("PO Rejected.");
-    loadData();
-  }
+  else { alert("PO Rejected."); loadData(); }
 }
 
 // ==========================================
@@ -344,7 +321,6 @@ async function rejectPO(poId) {
 async function openManageModal(btnElement) {
   const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
   currentManagePO = po;
-  
   document.getElementById('manage-po-num').innerText = po.po_number;
   document.getElementById('manage-payment-done').checked = (po.payment_status === 'Paid');
   document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4">Loading items...</td></tr>';
@@ -358,9 +334,7 @@ async function openManageModal(btnElement) {
           <td>${item.description}</td>
           <td style="text-align:center;">${item.ordered_qty}</td>
           <td style="text-align:center;">${item.received_qty || 0}</td>
-          <td>
-            <input type="number" class="recv-input" data-id="${item.id}" data-type="table" max="${item.ordered_qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
-          </td>
+          <td><input type="number" class="recv-input" data-id="${item.id}" data-type="table" max="${item.ordered_qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;"></td>
         </tr>
       `).join('');
   } else {
@@ -370,9 +344,7 @@ async function openManageModal(btnElement) {
               <td>${item.description || item.name}</td>
               <td style="text-align:center;">${item.qty}</td>
               <td style="text-align:center;">${item.received_qty || 0}</td>
-              <td>
-                <input type="number" class="recv-input" data-index="${index}" data-type="json" max="${item.qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
-              </td>
+              <td><input type="number" class="recv-input" data-index="${index}" data-type="json" max="${item.qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;"></td>
             </tr>
           `).join('');
       } else {
@@ -394,15 +366,11 @@ async function savePOUpdates() {
       const type = inp.getAttribute('data-type');
       const val = parseFloat(inp.value) || 0;
       const max = parseFloat(inp.getAttribute('max')) || 0;
-      
       if (val < max) allReceived = false;
-
       if (type === 'table') {
-          const id = inp.getAttribute('data-id');
-          await supabaseClient.from('po_items').update({ received_qty: val }).eq('id', id);
+          await supabaseClient.from('po_items').update({ received_qty: val }).eq('id', inp.getAttribute('data-id'));
       } else if (type === 'json') {
-          const index = parseInt(inp.getAttribute('data-index'), 10);
-          updatedJsonItems[index].received_qty = val;
+          updatedJsonItems[parseInt(inp.getAttribute('data-index'), 10)].received_qty = val;
           jsonUpdateNeeded = true;
       }
     }
@@ -411,21 +379,13 @@ async function savePOUpdates() {
     const poStatus = (isPaid && allReceived) ? 'Closed' : 'Open';
     
     let updatePayload = { payment_status: paymentStatus, po_status: poStatus };
-    if (jsonUpdateNeeded) {
-        updatePayload.items = updatedJsonItems;
-    }
+    if (jsonUpdateNeeded) updatePayload.items = updatedJsonItems;
 
-    await supabaseClient.from('purchase_orders')
-      .update(updatePayload)
-      .eq('id', currentManagePO.id);
-
+    await supabaseClient.from('purchase_orders').update(updatePayload).eq('id', currentManagePO.id);
     alert(`PO Updated!\nStatus: ${poStatus}\nPayment: ${paymentStatus}`);
     document.getElementById('manage-modal').style.display = 'none';
     loadData();
-
-  } catch (err) {
-    alert("Error updating PO: " + err.message);
-  }
+  } catch (err) { alert("Error updating PO: " + err.message); }
 }
 
 // ==========================================
@@ -535,10 +495,7 @@ async function generatePO() {
       .gte('created_at', startOfMonth)
       .lte('created_at', endOfMonth);
 
-    if (fetchError) {
-      alert("Error checking monthly limits: " + fetchError.message);
-      return;
-    }
+    if (fetchError) return alert("Error checking monthly limits: " + fetchError.message);
 
     const previousMonthlyTotal = (monthlyPOs || []).reduce((sum, po) => sum + (Number(po.net_amount) || 0), 0);
     const projectedMonthlyTotal = previousMonthlyTotal + currentPoNetAmount;
@@ -574,27 +531,16 @@ async function generatePO() {
       }])
       .select();
 
-    if (poError) {
-      alert("Error creating PO: " + poError.message);
-      return;
-    }
+    if (poError) return alert("Error creating PO: " + poError.message);
 
     const po = poResponse && poResponse.length > 0 ? poResponse[0] : null;
 
     if (po && po.id) {
       const itemsToInsert = items.map(item => ({
-        po_id: po.id,
-        description: item.description,
-        rate: item.rate,
-        ordered_qty: item.qty, 
-        received_qty: 0 
+        po_id: po.id, description: item.description, rate: item.rate, ordered_qty: item.qty, received_qty: 0 
       }));
-      
-      try {
-          await supabaseClient.from('po_items').insert(itemsToInsert);
-      } catch (itemInsertError) {
-          console.warn("Items tracking skipped due to error.", itemInsertError);
-      }
+      try { await supabaseClient.from('po_items').insert(itemsToInsert); } 
+      catch (itemInsertError) { console.warn("Items tracking skipped due to error.", itemInsertError); }
     }
 
     alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
@@ -603,7 +549,6 @@ async function generatePO() {
     document.getElementById('po-subtotal').value = '';
     document.getElementById('po-grandtotal').value = '';
     addPORow();
-    
     loadData(); 
     switchTab('tab-dashboard');
 
@@ -614,7 +559,7 @@ async function generatePO() {
 }
 
 // ==========================================
-// 8. DYNAMIC PDF GENERATION (PERFECT FIT)
+// 8. DYNAMIC PDF GENERATION (NO FLASHING / NO CROPPING)
 // ==========================================
 function downloadPDF(btnElement) {
   try {
@@ -661,16 +606,9 @@ function downloadPDF(btnElement) {
         </div>`;
     }
 
-    // CREATE CONTAINER & ATTACH TO BODY AT +2000px RIGHT
-    const container = document.createElement('div');
-    container.style.position = 'absolute';
-    container.style.top = '0';
-    container.style.left = '2000px'; // Prevent negative origin crop!
-    container.style.width = '794px'; // Strict A4 Width
-    container.style.backgroundColor = '#ffffff';
-
-    container.innerHTML = `
-      <div style="padding:40px; font-family:sans-serif; width:100%; box-sizing:border-box;">
+    // Pass the raw HTML string directly to html2pdf, completely bypassing the DOM!
+    const rawHTML = `
+      <div style="padding:40px; font-family:sans-serif; width:800px; box-sizing:border-box; background:#ffffff;">
         <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
         <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
         <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
@@ -709,19 +647,16 @@ function downloadPDF(btnElement) {
       </div>
     `;
 
-    document.body.appendChild(container); // Absolutely crucial for proper html2canvas rendering
-
+    // html2pdf will automatically process the string without showing it on screen!
     const opt = {
       margin:       0.2, 
       filename:     `${po.po_number}.pdf`,
       image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true },
+      html2canvas:  { scale: 2, useCORS: true, windowWidth: 800 },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
-    html2pdf().set(opt).from(container).save().then(() => {
-      document.body.removeChild(container); // Clean up container after download
-    });
+    html2pdf().set(opt).from(rawHTML).save();
 
   } catch (error) {
     console.error("PDF Generation Error:", error);
