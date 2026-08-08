@@ -44,32 +44,63 @@
   .btn-primary { background:var(--emerald-800); color:var(--gold-300); }
   .btn-gold { background:var(--gold-500); color:#fff; }
   .btn-danger { background:#B5502D; color:#fff; }
+  .btn-success { background:#166247; color:#fff; }
   
   /* Tables */
   table { width:100%; border-collapse:collapse; background:#fff; border-radius:8px; overflow:hidden; border:1px solid var(--line); }
   th { background:var(--emerald-900); color:var(--ivory-50); text-align:left; padding:12px; font-size:12px; text-transform:uppercase; }
   td { padding:12px; border-top:1px solid var(--line); font-size:14px; }
   
-  /* Login Screen */
-  #login-screen { position:fixed; inset:0; background:var(--ivory-50); display:flex; align-items:center; justify-content:center; z-index:100; }
-  .login-box { background:#fff; padding:40px; border-radius:12px; border:1px solid var(--line); width:100%; max-width:400px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.05); }
+  /* Login Screen & Modals */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .login-box, .modal-box { background:#fff; padding:30px; border-radius:12px; border:1px solid var(--line); width:100%; max-width:400px; box-shadow:0 10px 30px rgba(0,0,0,0.1); }
+  .modal-box { max-width: 600px; max-height: 90vh; overflow-y: auto; }
 
   /* PO Status Badges */
   .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
   .badge.pending { background: #fff3cd; color: #856404; }
   .badge.approved { background: #d1e7dd; color: #0f5132; }
+  .badge.closed { background: #e2e3e5; color: #383d41; }
+  .badge.rejected { background: #f8d7da; color: #842029; }
 </style>
 </head>
 <body>
 
 <!-- LOGIN -->
-<div id="login-screen">
-  <div class="login-box">
+<div id="login-screen" class="overlay">
+  <div class="login-box" style="text-align:center;">
     <h2 style="color:var(--emerald-900); margin-bottom:5px;">Panna Jewellers</h2>
     <p style="color:var(--gold-500); font-size:12px; text-transform:uppercase; margin-bottom:24px;">PO Generator Desk</p>
     <div class="field" style="text-align:left;"><label>Username</label><input type="text" id="login-user"></div>
     <div class="field" style="text-align:left;"><label>Password</label><input type="password" id="login-pass"></div>
     <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="login()">Sign In</button>
+  </div>
+</div>
+
+<!-- MANAGE PO MODAL (RECEIVING & PAYMENT) -->
+<div id="manage-modal" class="overlay" style="display:none;">
+  <div class="modal-box">
+    <h2 style="margin-bottom:15px; color:var(--emerald-900);">Manage PO: <span id="manage-po-num"></span></h2>
+    <p style="font-size:14px; color:var(--ink-500);">Update received quantities and payment status below.</p>
+    
+    <table style="margin: 20px 0;">
+      <thead>
+        <tr><th>Item</th><th>Ordered</th><th>Received</th><th>Update Total Recv</th></tr>
+      </thead>
+      <tbody id="manage-items-body"></tbody>
+    </table>
+    
+    <div class="field" style="background:var(--ivory-50); padding:15px; border-radius:8px; border:1px solid var(--line);">
+      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px;">
+        <input type="checkbox" id="manage-payment-done" style="width:18px; height:18px;">
+        Payment Completely Paid (Check to close PO)
+      </label>
+    </div>
+    
+    <div style="text-align:right; margin-top:20px;">
+      <button class="btn" style="background:#eee; color:#333;" onclick="document.getElementById('manage-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="savePOUpdates()">Save Updates</button>
+    </div>
   </div>
 </div>
 
@@ -167,6 +198,7 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 let DEPARTMENTS = [];
 let VENDORS = [];
+let currentManagePO = null; 
 
 // ==========================================
 // 2. AUTHENTICATION & NAVIGATION
@@ -194,7 +226,6 @@ function logout() { location.reload(); }
 function switchTab(tabId) {
   document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  
   document.getElementById(tabId).classList.add('active');
   
   if (tabId === 'tab-dashboard') document.querySelectorAll('.tab')[0].classList.add('active');
@@ -203,7 +234,7 @@ function switchTab(tabId) {
 }
 
 // ==========================================
-// 3. LOAD CORE DATA
+// 3. LOAD CORE DATA & DASHBOARD
 // ==========================================
 async function loadData() {
   const { data: depts } = await supabaseClient.from('po_departments').select('*').order('name');
@@ -216,19 +247,44 @@ async function loadData() {
   document.getElementById('po-vendor').innerHTML = VENDORS.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
   document.getElementById('ven-list').innerHTML = VENDORS.map(v => `<tr><td>${v.name}</td><td>${v.gstin || '-'}</td></tr>`).join('');
 
-  if (currentUser.role === 'admin') {
+  if (currentUser && currentUser.role === 'admin') {
     const { data: users } = await supabaseClient.from('po_users').select('*');
     document.getElementById('user-list').innerHTML = (users||[]).map(u => `<tr><td>${u.name}</td><td>${u.username}</td><td>${u.role}</td></tr>`).join('');
   }
 
   const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name)').order('created_at', { ascending: false });
   document.getElementById('po-list').innerHTML = (pos||[]).map(po => {
-    const isPending = po.approval_status === 'Pending';
-    const badgeClass = isPending ? 'badge pending' : 'badge approved';
-    const trackingStr = `Status: ${po.po_status || 'Open'}<br>Payment: ${po.payment_status || 'Not Paid'}`;
     
-    // SAFE ENCODING: Prevents quotes in JSON from breaking the button click
+    // Status badges
+    let badgeClass = 'badge approved';
+    if(po.approval_status === 'Pending') badgeClass = 'badge pending';
+    if(po.approval_status === 'Rejected') badgeClass = 'badge rejected';
+    if(po.po_status === 'Closed') badgeClass = 'badge closed';
+    
+    // Status coloring
+    const statusColor = po.po_status === 'Closed' ? '#383d41' : '#0f5132';
+    const payColor = po.payment_status === 'Paid' ? '#0f5132' : '#856404';
+    
+    const trackingStr = `
+      <strong style="color:${statusColor}">Status: ${po.po_status || 'Open'}</strong><br>
+      <span style="color:${payColor}">Payment: ${po.payment_status || 'Not Paid'}</span>
+    `;
+    
     const encodedPO = encodeURIComponent(JSON.stringify(po)); 
+    
+    // Base action buttons
+    let actionButtons = `
+      <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="downloadPDF(this)">PDF</button>
+      <button class="btn btn-gold" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="openManageModal(this)">Manage</button>
+    `;
+
+    // Only show Approve/Reject to ADMINS if the PO is PENDING
+    if (po.approval_status === 'Pending' && currentUser.role === 'admin') {
+      actionButtons += `
+        <button class="btn btn-success" style="padding:6px 12px; font-size:12px;" onclick="approvePO('${po.id}')">Approve</button>
+        <button class="btn btn-danger" style="padding:6px 12px; font-size:12px;" onclick="rejectPO('${po.id}')">Reject</button>
+      `;
+    }
     
     return `
       <tr>
@@ -238,11 +294,11 @@ async function loadData() {
         <td>${po.po_vendors ? po.po_vendors.name : 'Unknown'}</td>
         <td>₹ ${po.grand_total ? po.grand_total.toLocaleString() : '0'}</td>
         <td><span class="${badgeClass}">${po.approval_status || 'N/A'}</span></td>
-        <td style="font-size:11px; color:#666;">${trackingStr}</td>
+        <td style="font-size:11px; line-height:1.4;">${trackingStr}</td>
         <td>
-          <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="downloadPDF(this)">
-            Download PDF
-          </button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${actionButtons}
+          </div>
         </td>
       </tr>
     `;
@@ -250,7 +306,103 @@ async function loadData() {
 }
 
 // ==========================================
-// 4. ADMIN FUNCTIONS
+// 4. APPROVE / REJECT FUNCTIONS (FOR SENIOR)
+// ==========================================
+async function approvePO(poId) {
+  if (!confirm("Are you sure you want to officially APPROVE this Purchase Order?")) return;
+  
+  const signatureUrl = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png';
+  
+  const { error } = await supabaseClient.from('purchase_orders')
+    .update({ approval_status: 'Manual-Approved', approver_signature: signatureUrl })
+    .eq('id', poId);
+    
+  if (error) alert("Error updating PO: " + error.message);
+  else {
+    alert("PO Successfully Approved!");
+    loadData(); // Refresh the list
+  }
+}
+
+async function rejectPO(poId) {
+  if (!confirm("Are you sure you want to REJECT this Purchase Order?")) return;
+  
+  const { error } = await supabaseClient.from('purchase_orders')
+    .update({ approval_status: 'Rejected', po_status: 'Closed' }) // Rejection auto-closes the PO
+    .eq('id', poId);
+    
+  if (error) alert("Error rejecting PO: " + error.message);
+  else {
+    alert("PO Rejected.");
+    loadData();
+  }
+}
+
+// ==========================================
+// 5. GOODS RECEIVING & PAYMENT WORKFLOW
+// ==========================================
+async function openManageModal(btnElement) {
+  const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
+  currentManagePO = po;
+  
+  document.getElementById('manage-po-num').innerText = po.po_number;
+  document.getElementById('manage-payment-done').checked = (po.payment_status === 'Paid');
+  document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4">Loading items...</td></tr>';
+  document.getElementById('manage-modal').style.display = 'flex';
+
+  const { data: items, error } = await supabaseClient.from('po_items').select('*').eq('po_id', po.id);
+  
+  if (error || !items) {
+    document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4" style="color:red;">Error loading items. Check if po_items table exists.</td></tr>';
+    return;
+  }
+
+  document.getElementById('manage-items-body').innerHTML = items.map(item => `
+    <tr>
+      <td>${item.description}</td>
+      <td style="text-align:center;">${item.ordered_qty}</td>
+      <td style="text-align:center;">${item.received_qty || 0}</td>
+      <td>
+        <input type="number" class="recv-input" data-id="${item.id}" max="${item.ordered_qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function savePOUpdates() {
+  const isPaid = document.getElementById('manage-payment-done').checked;
+  const inputs = document.querySelectorAll('.recv-input');
+  
+  try {
+    let allReceived = true;
+
+    for (let inp of inputs) {
+      const id = inp.getAttribute('data-id');
+      const val = parseFloat(inp.value) || 0;
+      const max = parseFloat(inp.getAttribute('max')) || 0;
+      
+      if (val < max) allReceived = false;
+      await supabaseClient.from('po_items').update({ received_qty: val }).eq('id', id);
+    }
+
+    const paymentStatus = isPaid ? 'Paid' : 'Not Paid';
+    const poStatus = (isPaid && allReceived) ? 'Closed' : 'Open';
+
+    await supabaseClient.from('purchase_orders')
+      .update({ payment_status: paymentStatus, po_status: poStatus })
+      .eq('id', currentManagePO.id);
+
+    alert(`PO Updated!\nStatus: ${poStatus}\nPayment: ${paymentStatus}`);
+    document.getElementById('manage-modal').style.display = 'none';
+    loadData();
+
+  } catch (err) {
+    alert("Error updating PO: " + err.message);
+  }
+}
+
+// ==========================================
+// 6. ADMIN FUNCTIONS
 // ==========================================
 async function addDepartment() {
   const name = document.getElementById('new-dept-name').value;
@@ -279,7 +431,7 @@ async function addUser() {
 }
 
 // ==========================================
-// 5. PO GENERATOR LOGIC
+// 7. PO GENERATOR LOGIC
 // ==========================================
 function addPORow() {
   const tr = document.createElement('tr');
@@ -321,192 +473,218 @@ function calculateGrandTotal() {
 }
 
 async function generatePO() {
-  const deptCode = document.getElementById('po-dept').value;
-  const vendorId = document.getElementById('po-vendor').value;
-  const subtotal = parseFloat(document.getElementById('po-subtotal').value) || 0;
-  const gst = parseFloat(document.getElementById('po-gst').value) || 0;
-  const grandTotal = parseFloat(document.getElementById('po-grandtotal').value) || 0;
+  try {
+    const deptCode = document.getElementById('po-dept').value;
+    const vendorId = document.getElementById('po-vendor').value;
+    const subtotal = parseFloat(document.getElementById('po-subtotal').value) || 0;
+    const gst = parseFloat(document.getElementById('po-gst').value) || 0;
+    const grandTotal = parseFloat(document.getElementById('po-grandtotal').value) || 0;
 
-  if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
+    if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
 
-  const items = [];
-  document.querySelectorAll('.po-item-row').forEach(row => {
-    items.push({
-      description: row.querySelector('.i-name').value,
-      purity: row.querySelector('.i-purity').value,
-      weight: parseFloat(row.querySelector('.i-weight').value) || 0,
-      qty: parseFloat(row.querySelector('.i-qty').value) || 0,
-      rate: parseFloat(row.querySelector('.i-rate').value) || 0,
-      total: parseFloat(row.querySelector('.i-total').value) || 0
+    const items = [];
+    document.querySelectorAll('.po-item-row').forEach(row => {
+      items.push({
+        description: row.querySelector('.i-name').value,
+        purity: row.querySelector('.i-purity').value,
+        weight: parseFloat(row.querySelector('.i-weight').value) || 0,
+        qty: parseFloat(row.querySelector('.i-qty').value) || 0,
+        rate: parseFloat(row.querySelector('.i-rate').value) || 0,
+        total: parseFloat(row.querySelector('.i-total').value) || 0
+      });
     });
-  });
 
-  if(items.length === 0 || !items[0].description) return alert("Add at least one item description.");
+    if(items.length === 0 || !items[0].description) return alert("Add at least one item description.");
 
-  const currentPoNetAmount = subtotal; 
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+    const currentPoNetAmount = subtotal; 
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
 
-  const { data: monthlyPOs, error: fetchError } = await supabaseClient
-    .from('purchase_orders')
-    .select('net_amount')
-    .eq('department_code', deptCode)
-    .gte('created_at', startOfMonth)
-    .lte('created_at', endOfMonth);
+    const { data: monthlyPOs, error: fetchError } = await supabaseClient
+      .from('purchase_orders')
+      .select('net_amount')
+      .eq('department_code', deptCode)
+      .gte('created_at', startOfMonth)
+      .lte('created_at', endOfMonth);
 
-  if (fetchError) return alert("Error checking monthly limits: " + fetchError.message);
+    if (fetchError) {
+      alert("Error checking monthly limits: " + fetchError.message);
+      return;
+    }
 
-  const previousMonthlyTotal = monthlyPOs.reduce((sum, po) => sum + (Number(po.net_amount) || 0), 0);
-  const projectedMonthlyTotal = previousMonthlyTotal + currentPoNetAmount;
+    const previousMonthlyTotal = (monthlyPOs || []).reduce((sum, po) => sum + (Number(po.net_amount) || 0), 0);
+    const projectedMonthlyTotal = previousMonthlyTotal + currentPoNetAmount;
 
-  let approvalStatus = 'Pending';
-  let approverSignature = null;
+    let approvalStatus = 'Pending';
+    let approverSignature = null;
 
-  if (projectedMonthlyTotal <= 5000) {
-    approvalStatus = 'Auto-Approved';
-    approverSignature = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png'; 
+    if (projectedMonthlyTotal <= 5000) {
+      approvalStatus = 'Auto-Approved';
+      approverSignature = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png'; 
+    }
+
+    const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
+    const seqNumber = String((count || 0) + 1).padStart(4, '0');
+    const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
+
+    const { data: poResponse, error: poError } = await supabaseClient
+      .from('purchase_orders')
+      .insert([{
+        po_number: finalPONumber,
+        department_code: deptCode,
+        vendor_id: vendorId,
+        items: items, 
+        subtotal: subtotal,
+        gst: gst,
+        grand_total: grandTotal,
+        net_amount: currentPoNetAmount,
+        approval_status: approvalStatus,
+        approver_signature: approverSignature,
+        po_status: 'Open',
+        payment_status: 'Not Paid',
+        created_by: currentUser.name
+      }])
+      .select();
+
+    if (poError) {
+      alert("Error creating PO: " + poError.message);
+      return;
+    }
+
+    const po = poResponse && poResponse.length > 0 ? poResponse[0] : null;
+
+    if (po && po.id) {
+      const itemsToInsert = items.map(item => ({
+        po_id: po.id,
+        description: item.description,
+        rate: item.rate,
+        ordered_qty: item.qty, 
+        received_qty: 0 
+      }));
+      
+      await supabaseClient.from('po_items').insert(itemsToInsert).catch(e => console.warn("Items tracking skipped:", e));
+    }
+
+    alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
+    
+    document.getElementById('po-items-body').innerHTML = ''; 
+    document.getElementById('po-subtotal').value = '';
+    document.getElementById('po-grandtotal').value = '';
+    addPORow();
+    
+    loadData(); 
+    switchTab('tab-dashboard');
+
+  } catch (error) {
+    console.error("Submission Error:", error);
+    alert("An unexpected error occurred during submission: " + error.message);
   }
-
-  const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
-  const seqNumber = String((count || 0) + 1).padStart(4, '0');
-  const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
-
-  const { data: po, error: poError } = await supabaseClient
-    .from('purchase_orders')
-    .insert([{
-      po_number: finalPONumber,
-      department_code: deptCode,
-      vendor_id: vendorId,
-      items: items, 
-      subtotal: subtotal,
-      gst: gst,
-      grand_total: grandTotal,
-      net_amount: currentPoNetAmount,
-      approval_status: approvalStatus,
-      approver_signature: approverSignature,
-      po_status: 'Open',
-      payment_status: 'Not Paid',
-      created_by: currentUser.name
-    }])
-    .select()
-    .single();
-
-  if (poError) return alert("Error creating PO: " + poError.message);
-
-  const itemsToInsert = items.map(item => ({
-    po_id: po.id,
-    description: item.description,
-    rate: item.rate,
-    ordered_qty: item.qty, 
-    received_qty: 0 
-  }));
-  
-  await supabaseClient.from('po_items').insert(itemsToInsert).catch(e => console.warn("Items tracking skipped:", e));
-
-  alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
-  
-  document.getElementById('po-items-body').innerHTML = ''; 
-  document.getElementById('po-subtotal').value = '';
-  document.getElementById('po-grandtotal').value = '';
-  addPORow();
-  
-  loadData(); 
-  switchTab('tab-dashboard');
 }
 
 // ==========================================
-// 6. DYNAMIC PDF GENERATION (DIRECT STRING RENDER)
+// 8. DYNAMIC PDF GENERATION (FIT-TO-PAGE FIXED)
 // ==========================================
 function downloadPDF(btnElement) {
-  // 1. Decode safely from the button click
-  const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
-  
-  const vendorName = po.po_vendors ? po.po_vendors.name : 'Unknown Vendor';
-  const dateStr = po.created_at ? new Date(po.created_at).toLocaleDateString() : 'N/A';
-  
-  let itemsHtml = '';
-  if (po.items && Array.isArray(po.items)) {
-    po.items.forEach((item, index) => {
-      itemsHtml += `
-        <tr>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${index + 1}</td>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.description || item.name}</td>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.weight || '-'}</td>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.qty}</td>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.rate}</td>
-          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.total}</td>
-        </tr>
-      `;
-    });
-  }
-
-  let signatureHtml = '';
-  if (po.approval_status === 'Auto-Approved' || po.approval_status === 'Manual-Approved') {
-    signatureHtml = `
-      <div style="margin-top:50px; text-align:right;">
-        <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
-        <p style="margin:5px 0 0; color:#0F4C3A; font-weight:bold;">[ ${po.approval_status.toUpperCase()} ]</p>
-      </div>`;
-  } else {
-    signatureHtml = `
-      <div style="margin-top:50px; text-align:right;">
-        <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
-        <p style="margin:5px 0 0; color:#B5502D; font-weight:bold;">[ PENDING APPROVAL ]</p>
-      </div>`;
-  }
-
-  // 2. Build the exact HTML string (No DOM appending needed)
-  const htmlContent = `
-    <div style="padding:40px; background:#ffffff; width:794px; box-sizing:border-box; font-family:sans-serif;">
-      <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
-      <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
-      <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
-      
-      <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
-      
-      <div style="margin-bottom:30px;">
-        <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
-        <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
-        <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
-      </div>
-      
-      <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
-        <thead>
-          <tr style="background:#0B3527; color:#ffffff;">
-            <th style="padding:10px;">#</th>
-            <th style="padding:10px;">Item Description</th>
-            <th style="padding:10px;">Wt (g/ct)</th>
-            <th style="padding:10px;">Qty</th>
-            <th style="padding:10px;">Rate</th>
-            <th style="padding:10px;">Total</th>
+  try {
+    const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
+    
+    const vendorName = po.po_vendors ? po.po_vendors.name : 'Unknown Vendor';
+    const dateStr = po.created_at ? new Date(po.created_at).toLocaleDateString() : 'N/A';
+    
+    let itemsHtml = '';
+    if (po.items && Array.isArray(po.items)) {
+      po.items.forEach((item, index) => {
+        itemsHtml += `
+          <tr>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${index + 1}</td>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.description || item.name}</td>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.weight || '-'}</td>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.qty}</td>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.rate}</td>
+            <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.total}</td>
           </tr>
-        </thead>
-        <tbody>
-          ${itemsHtml}
-        </tbody>
-      </table>
-      
-      <div style="text-align:right; margin-top:30px; font-size:14px;">
-        <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
-        <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
-        <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
+        `;
+      });
+    }
+
+    let signatureHtml = '';
+    if (po.approval_status === 'Auto-Approved' || po.approval_status === 'Manual-Approved') {
+      signatureHtml = `
+        <div style="margin-top:50px; text-align:right;">
+          <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
+          <img src="${po.approver_signature || 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png'}" style="height:60px; margin-top:10px;" alt="Signature">
+          <p style="margin:5px 0 0; color:#0F4C3A; font-weight:bold;">[ ${po.approval_status.toUpperCase()} ]</p>
+        </div>`;
+    } else if (po.approval_status === 'Rejected') {
+      signatureHtml = `
+        <div style="margin-top:50px; text-align:right;">
+          <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
+          <p style="margin:10px 0 0; color:#842029; font-weight:bold; font-size:18px;">[ REJECTED ]</p>
+        </div>`;
+    } else {
+      signatureHtml = `
+        <div style="margin-top:50px; text-align:right;">
+          <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
+          <p style="margin:10px 0 0; color:#B5502D; font-weight:bold; font-size:16px;">[ PENDING APPROVAL ]</p>
+        </div>`;
+    }
+
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <div style="padding:30px; font-family:sans-serif; width:100%; box-sizing:border-box;">
+        <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
+        <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
+        <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
+        
+        <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
+        
+        <div style="margin-bottom:30px;">
+          <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
+          <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
+          <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
+        </div>
+        
+        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
+          <thead>
+            <tr style="background:#0B3527; color:#ffffff;">
+              <th style="padding:10px;">#</th>
+              <th style="padding:10px;">Item Description</th>
+              <th style="padding:10px;">Wt (g/ct)</th>
+              <th style="padding:10px;">Qty</th>
+              <th style="padding:10px;">Rate</th>
+              <th style="padding:10px;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+        
+        <div style="text-align:right; margin-top:30px; font-size:14px;">
+          <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
+          <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
+          <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
+        </div>
+        
+        ${signatureHtml}
       </div>
-      
-      ${signatureHtml}
-    </div>
-  `;
+    `;
 
-  // 3. Render directly from string!
-  const opt = {
-    margin:       0.5, 
-    filename:     `${po.po_number}.pdf`,
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true },
-    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-  };
+    const opt = {
+      margin:       0.3, 
+      filename:     `${po.po_number}.pdf`,
+      image:        { type: 'jpeg', quality: 1 },
+      html2canvas:  { scale: 2, useCORS: true, windowWidth: 800 },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
 
-  html2pdf().set(opt).from(htmlContent).save();
+    html2pdf().set(opt).from(container).save();
+
+  } catch (error) {
+    console.error("PDF Generation Error:", error);
+    alert("An error occurred while generating the PDF. Check the browser console.");
+  }
 }
 </script>
 </body>
