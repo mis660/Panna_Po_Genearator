@@ -14,7 +14,7 @@
     --ink-900:#1B1B18; --ink-500:#6B6558; --line:#E4DCC8;
   }
   * { box-sizing:border-box; font-family:'Inter',sans-serif; }
-  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; }
+  body { margin:0; background:var(--ivory-50); color:var(--ink-900); min-height:100vh; position:relative; }
   h1,h2,h3 { font-family:'Playfair Display',serif; margin:0; }
   .mono { font-family:'JetBrains Mono',monospace; }
   
@@ -320,7 +320,7 @@ async function approvePO(poId) {
   if (error) alert("Error updating PO: " + error.message);
   else {
     alert("PO Successfully Approved!");
-    loadData(); // Refresh the list
+    loadData(); 
   }
 }
 
@@ -328,7 +328,7 @@ async function rejectPO(poId) {
   if (!confirm("Are you sure you want to REJECT this Purchase Order?")) return;
   
   const { error } = await supabaseClient.from('purchase_orders')
-    .update({ approval_status: 'Rejected', po_status: 'Closed' }) // Rejection auto-closes the PO
+    .update({ approval_status: 'Rejected', po_status: 'Closed' }) 
     .eq('id', poId);
     
   if (error) alert("Error rejecting PO: " + error.message);
@@ -350,7 +350,6 @@ async function openManageModal(btnElement) {
   document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4">Loading items...</td></tr>';
   document.getElementById('manage-modal').style.display = 'flex';
 
-  // 1. Try fetching from the po_items table
   const { data: items, error } = await supabaseClient.from('po_items').select('*').eq('po_id', po.id);
   
   if (!error && items && items.length > 0) {
@@ -365,7 +364,6 @@ async function openManageModal(btnElement) {
         </tr>
       `).join('');
   } else {
-      // 2. Fallback: Use the JSON items stored in the main purchase_orders record
       if (po.items && Array.isArray(po.items)) {
           document.getElementById('manage-items-body').innerHTML = po.items.map((item, index) => `
             <tr>
@@ -390,7 +388,7 @@ async function savePOUpdates() {
   try {
     let allReceived = true;
     let jsonUpdateNeeded = false;
-    let updatedJsonItems = [...currentManagePO.items]; // Copy current JSON items
+    let updatedJsonItems = [...currentManagePO.items]; 
 
     for (let inp of inputs) {
       const type = inp.getAttribute('data-type');
@@ -592,11 +590,10 @@ async function generatePO() {
         received_qty: 0 
       }));
       
-      // Removed the .catch() to resolve the syntax error. Used a try/catch block instead.
       try {
           await supabaseClient.from('po_items').insert(itemsToInsert);
       } catch (itemInsertError) {
-          console.warn("Items tracking skipped due to error. This may mean the po_items table does not exist yet.", itemInsertError);
+          console.warn("Items tracking skipped due to error.", itemInsertError);
       }
     }
 
@@ -617,7 +614,7 @@ async function generatePO() {
 }
 
 // ==========================================
-// 8. DYNAMIC PDF GENERATION (FIT-TO-PAGE FIXED)
+// 8. DYNAMIC PDF GENERATION (ABSOLUTE DOM ATTACHMENT FIX)
 // ==========================================
 function downloadPDF(btnElement) {
   try {
@@ -664,17 +661,25 @@ function downloadPDF(btnElement) {
         </div>`;
     }
 
+    // CREATE CONTAINER & ATTACH TO BODY
     const container = document.createElement('div');
-    // Reduced padding and used box-sizing to ensure it fits well within A4 constraints
+    // Hide it underneath the UI, but securely attach it to the DOM at A4 width so no clipping occurs
+    container.style.position = 'absolute';
+    container.style.top = '0';
+    container.style.left = '0';
+    container.style.width = '794px';
+    container.style.zIndex = '-9999';
+    container.style.background = '#ffffff';
+
     container.innerHTML = `
-      <div style="padding:20px; font-family:sans-serif; width:700px; box-sizing:border-box; margin:0 auto;">
+      <div style="padding:40px; font-family:sans-serif; width:100%; box-sizing:border-box;">
         <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
         <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
         <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
         
-        <hr style="border:0; border-top:2px solid #0B3527; margin:20px 0;">
+        <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
         
-        <div style="margin-bottom:25px;">
+        <div style="margin-bottom:30px;">
           <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
           <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
           <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
@@ -683,12 +688,12 @@ function downloadPDF(btnElement) {
         <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px; table-layout: fixed;">
           <thead>
             <tr style="background:#0B3527; color:#ffffff;">
-              <th style="padding:8px; width: 5%;">#</th>
-              <th style="padding:8px; width: 45%;">Item Description</th>
-              <th style="padding:8px; width: 15%;">Wt (g/ct)</th>
-              <th style="padding:8px; width: 10%;">Qty</th>
-              <th style="padding:8px; width: 10%;">Rate</th>
-              <th style="padding:8px; width: 15%;">Total</th>
+              <th style="padding:10px; width: 5%;">#</th>
+              <th style="padding:10px; width: 40%;">Item Description</th>
+              <th style="padding:10px; width: 15%;">Wt (g/ct)</th>
+              <th style="padding:10px; width: 10%;">Qty</th>
+              <th style="padding:10px; width: 15%;">Rate</th>
+              <th style="padding:10px; width: 15%;">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -696,7 +701,7 @@ function downloadPDF(btnElement) {
           </tbody>
         </table>
         
-        <div style="text-align:right; margin-top:25px; font-size:14px;">
+        <div style="text-align:right; margin-top:30px; font-size:14px;">
           <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
           <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
           <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
@@ -706,15 +711,19 @@ function downloadPDF(btnElement) {
       </div>
     `;
 
+    document.body.appendChild(container); // Absolutely crucial to prevent negative coordinate clipping
+
     const opt = {
-      margin:       0.5, 
+      margin:       0.2, 
       filename:     `${po.po_number}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
+      image:        { type: 'jpeg', quality: 1 },
       html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
-    html2pdf().set(opt).from(container).save();
+    html2pdf().set(opt).from(container).save().then(() => {
+      document.body.removeChild(container); // Clean up container after download
+    });
 
   } catch (error) {
     console.error("PDF Generation Error:", error);
