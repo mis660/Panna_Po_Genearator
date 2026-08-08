@@ -350,23 +350,37 @@ async function openManageModal(btnElement) {
   document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4">Loading items...</td></tr>';
   document.getElementById('manage-modal').style.display = 'flex';
 
+  // 1. Try fetching from the po_items table
   const { data: items, error } = await supabaseClient.from('po_items').select('*').eq('po_id', po.id);
   
-  if (error || !items) {
-    document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4" style="color:red;">Error loading items. Check if po_items table exists.</td></tr>';
-    return;
+  if (!error && items && items.length > 0) {
+      document.getElementById('manage-items-body').innerHTML = items.map(item => `
+        <tr>
+          <td>${item.description}</td>
+          <td style="text-align:center;">${item.ordered_qty}</td>
+          <td style="text-align:center;">${item.received_qty || 0}</td>
+          <td>
+            <input type="number" class="recv-input" data-id="${item.id}" data-type="table" max="${item.ordered_qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
+          </td>
+        </tr>
+      `).join('');
+  } else {
+      // 2. Fallback: Use the JSON items stored in the main purchase_orders record
+      if (po.items && Array.isArray(po.items)) {
+          document.getElementById('manage-items-body').innerHTML = po.items.map((item, index) => `
+            <tr>
+              <td>${item.description || item.name}</td>
+              <td style="text-align:center;">${item.qty}</td>
+              <td style="text-align:center;">${item.received_qty || 0}</td>
+              <td>
+                <input type="number" class="recv-input" data-index="${index}" data-type="json" max="${item.qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
+              </td>
+            </tr>
+          `).join('');
+      } else {
+           document.getElementById('manage-items-body').innerHTML = '<tr><td colspan="4" style="color:red;">No items found for this PO.</td></tr>';
+      }
   }
-
-  document.getElementById('manage-items-body').innerHTML = items.map(item => `
-    <tr>
-      <td>${item.description}</td>
-      <td style="text-align:center;">${item.ordered_qty}</td>
-      <td style="text-align:center;">${item.received_qty || 0}</td>
-      <td>
-        <input type="number" class="recv-input" data-id="${item.id}" max="${item.ordered_qty}" value="${item.received_qty || 0}" style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;">
-      </td>
-    </tr>
-  `).join('');
 }
 
 async function savePOUpdates() {
@@ -375,21 +389,36 @@ async function savePOUpdates() {
   
   try {
     let allReceived = true;
+    let jsonUpdateNeeded = false;
+    let updatedJsonItems = [...currentManagePO.items]; // Copy current JSON items
 
     for (let inp of inputs) {
-      const id = inp.getAttribute('data-id');
+      const type = inp.getAttribute('data-type');
       const val = parseFloat(inp.value) || 0;
       const max = parseFloat(inp.getAttribute('max')) || 0;
       
       if (val < max) allReceived = false;
-      await supabaseClient.from('po_items').update({ received_qty: val }).eq('id', id);
+
+      if (type === 'table') {
+          const id = inp.getAttribute('data-id');
+          await supabaseClient.from('po_items').update({ received_qty: val }).eq('id', id);
+      } else if (type === 'json') {
+          const index = parseInt(inp.getAttribute('data-index'), 10);
+          updatedJsonItems[index].received_qty = val;
+          jsonUpdateNeeded = true;
+      }
     }
 
     const paymentStatus = isPaid ? 'Paid' : 'Not Paid';
     const poStatus = (isPaid && allReceived) ? 'Closed' : 'Open';
+    
+    let updatePayload = { payment_status: paymentStatus, po_status: poStatus };
+    if (jsonUpdateNeeded) {
+        updatePayload.items = updatedJsonItems;
+    }
 
     await supabaseClient.from('purchase_orders')
-      .update({ payment_status: paymentStatus, po_status: poStatus })
+      .update(updatePayload)
       .eq('id', currentManagePO.id);
 
     alert(`PO Updated!\nStatus: ${poStatus}\nPayment: ${paymentStatus}`);
@@ -563,7 +592,12 @@ async function generatePO() {
         received_qty: 0 
       }));
       
-      await supabaseClient.from('po_items').insert(itemsToInsert).catch(e => console.warn("Items tracking skipped:", e));
+      // Removed the .catch() to resolve the syntax error. Used a try/catch block instead.
+      try {
+          await supabaseClient.from('po_items').insert(itemsToInsert);
+      } catch (itemInsertError) {
+          console.warn("Items tracking skipped due to error. This may mean the po_items table does not exist yet.", itemInsertError);
+      }
     }
 
     alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
@@ -631,29 +665,30 @@ function downloadPDF(btnElement) {
     }
 
     const container = document.createElement('div');
+    // Reduced padding and used box-sizing to ensure it fits well within A4 constraints
     container.innerHTML = `
-      <div style="padding:30px; font-family:sans-serif; width:100%; box-sizing:border-box;">
+      <div style="padding:20px; font-family:sans-serif; width:700px; box-sizing:border-box; margin:0 auto;">
         <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
         <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
         <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
         
-        <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
+        <hr style="border:0; border-top:2px solid #0B3527; margin:20px 0;">
         
-        <div style="margin-bottom:30px;">
+        <div style="margin-bottom:25px;">
           <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
           <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
           <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
         </div>
         
-        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
+        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px; table-layout: fixed;">
           <thead>
             <tr style="background:#0B3527; color:#ffffff;">
-              <th style="padding:10px;">#</th>
-              <th style="padding:10px;">Item Description</th>
-              <th style="padding:10px;">Wt (g/ct)</th>
-              <th style="padding:10px;">Qty</th>
-              <th style="padding:10px;">Rate</th>
-              <th style="padding:10px;">Total</th>
+              <th style="padding:8px; width: 5%;">#</th>
+              <th style="padding:8px; width: 45%;">Item Description</th>
+              <th style="padding:8px; width: 15%;">Wt (g/ct)</th>
+              <th style="padding:8px; width: 10%;">Qty</th>
+              <th style="padding:8px; width: 10%;">Rate</th>
+              <th style="padding:8px; width: 15%;">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -661,7 +696,7 @@ function downloadPDF(btnElement) {
           </tbody>
         </table>
         
-        <div style="text-align:right; margin-top:30px; font-size:14px;">
+        <div style="text-align:right; margin-top:25px; font-size:14px;">
           <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
           <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
           <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
@@ -672,10 +707,10 @@ function downloadPDF(btnElement) {
     `;
 
     const opt = {
-      margin:       0.3, 
+      margin:       0.5, 
       filename:     `${po.po_number}.pdf`,
-      image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, windowWidth: 800 },
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
