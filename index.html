@@ -6,7 +6,6 @@
 <title>Panna Jewellers Exclusive — PO Generator</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root {
     --emerald-900:#0B3527; --emerald-800:#0F4C3A; --emerald-700:#166247; --emerald-100:#DCEAE3;
@@ -77,7 +76,7 @@
   </div>
 </div>
 
-<!-- MANAGE PO MODAL -->
+<!-- MANAGE PO MODAL (RECEIVING & PAYMENT) -->
 <div id="manage-modal" class="overlay" style="display:none;">
   <div class="modal-box">
     <h2 style="margin-bottom:15px; color:var(--emerald-900);">Manage PO: <span id="manage-po-num"></span></h2>
@@ -270,8 +269,9 @@ async function loadData() {
     
     const encodedPO = encodeURIComponent(JSON.stringify(po)); 
     
+    // Changed "PDF" to "View / Print" to reflect the new functionality
     let actionButtons = `
-      <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="downloadPDF(this)">PDF</button>
+      <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="printPO(this)">View / Print</button>
       <button class="btn btn-gold" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="openManageModal(this)">Manage</button>
     `;
 
@@ -559,9 +559,9 @@ async function generatePO() {
 }
 
 // ==========================================
-// 8. DYNAMIC PDF GENERATION (NO FLASHING / NO CROPPING)
+// 8. VIEW / PRINT PO FUNCTION (NATIVE BROWSER PRINT)
 // ==========================================
-function downloadPDF(btnElement) {
+function printPO(btnElement) {
   try {
     const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
     
@@ -606,61 +606,84 @@ function downloadPDF(btnElement) {
         </div>`;
     }
 
-    // Pass the raw HTML string directly to html2pdf, completely bypassing the DOM!
-    const rawHTML = `
-      <div style="padding:40px; font-family:sans-serif; width:800px; box-sizing:border-box; background:#ffffff;">
-        <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
-        <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
-        <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
-        
-        <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
-        
-        <div style="margin-bottom:30px;">
-          <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
-          <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
-          <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
-        </div>
-        
-        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px; table-layout: fixed;">
-          <thead>
-            <tr style="background:#0B3527; color:#ffffff;">
-              <th style="padding:10px; width: 5%;">#</th>
-              <th style="padding:10px; width: 40%;">Item Description</th>
-              <th style="padding:10px; width: 15%;">Wt (g/ct)</th>
-              <th style="padding:10px; width: 10%;">Qty</th>
-              <th style="padding:10px; width: 15%;">Rate</th>
-              <th style="padding:10px; width: 15%;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
-        
-        <div style="text-align:right; margin-top:30px; font-size:14px;">
-          <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
-          <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
-          <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
-        </div>
-        
-        ${signatureHtml}
-      </div>
-    `;
+    // Open a new, clean window for the print preview
+    const printWindow = window.open('', '_blank');
+    
+    // Write the HTML for the print preview page
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${po.po_number}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #e9ecef; margin: 0; padding: 40px 0; }
+            .print-action-bar { text-align: center; margin-bottom: 30px; }
+            .print-btn { background-color: #0F4C3A; color: white; border: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: background 0.2s; }
+            .print-btn:hover { background-color: #0B3527; }
+            .document-container { max-width: 800px; margin: 0 auto; background: #ffffff; padding: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); box-sizing: border-box; }
+            table { width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px; }
+            th { background:#0B3527; color:#ffffff; padding:10px; }
+            
+            /* These styles activate ONLY when the user clicks 'Print' or 'Save as PDF' */
+            @media print {
+              body { background: white; padding: 0; }
+              .print-action-bar { display: none; } /* Hides the print button on the actual PDF */
+              .document-container { box-shadow: none; padding: 0; width: 100%; max-width: 100%; }
+            }
+          </style>
+        </head>
+        <body>
+          
+          <div class="print-action-bar">
+            <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+          </div>
 
-    // html2pdf will automatically process the string without showing it on screen!
-    const opt = {
-      margin:       0.2, 
-      filename:     `${po.po_number}.pdf`,
-      image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, windowWidth: 800 },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
+          <div class="document-container">
+            <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
+            <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
+            <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
+            
+            <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
+            
+            <div style="margin-bottom:30px;">
+              <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
+              <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
+              <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
+            </div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 5%;">#</th>
+                  <th style="width: 40%;">Item Description</th>
+                  <th style="width: 15%;">Wt (g/ct)</th>
+                  <th style="width: 10%;">Qty</th>
+                  <th style="width: 15%;">Rate</th>
+                  <th style="width: 15%;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+            
+            <div style="text-align:right; margin-top:30px; font-size:14px;">
+              <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
+              <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
+              <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
+            </div>
+            
+            ${signatureHtml}
+          </div>
 
-    html2pdf().set(opt).from(rawHTML).save();
+        </body>
+      </html>
+    `);
+    
+    printWindow.document.close();
 
   } catch (error) {
-    console.error("PDF Generation Error:", error);
-    alert("An error occurred while generating the PDF. Check the browser console.");
+    console.error("View Preview Error:", error);
+    alert("An error occurred while generating the document view. Check the browser console.");
   }
 }
 </script>
