@@ -53,6 +53,11 @@
   /* Login Screen */
   #login-screen { position:fixed; inset:0; background:var(--ivory-50); display:flex; align-items:center; justify-content:center; z-index:100; }
   .login-box { background:#fff; padding:40px; border-radius:12px; border:1px solid var(--line); width:100%; max-width:400px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.05); }
+
+  /* PO Status Badges */
+  .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+  .badge.pending { background: #fff3cd; color: #856404; }
+  .badge.approved { background: #d1e7dd; color: #0f5132; }
 </style>
 </head>
 <body>
@@ -87,7 +92,7 @@
     <h2>Recent Purchase Orders</h2>
     <p style="color:var(--ink-500); font-size:14px; margin-bottom:20px;">All generated POs across departments.</p>
     <table>
-      <thead><tr><th>PO Number</th><th>Date</th><th>Department</th><th>Vendor</th><th>Total Value</th><th></th></tr></thead>
+      <thead><tr><th>PO Number</th><th>Date</th><th>Department</th><th>Vendor</th><th>Value</th><th>Approval Status</th><th>Tracking</th><th>Actions</th></tr></thead>
       <tbody id="po-list"></tbody>
     </table>
   </div>
@@ -112,7 +117,7 @@
         <div class="field"><label style="display:inline-block; width:100px;">Subtotal (₹)</label><input type="number" id="po-subtotal" readonly style="width:200px; background:var(--ivory-50);"></div>
         <div class="field"><label style="display:inline-block; width:100px;">GST %</label><input type="number" id="po-gst" value="3" onchange="calculateGrandTotal()" style="width:200px;"></div>
         <div class="field"><label style="display:inline-block; width:100px;">Grand Total (₹)</label><input type="number" id="po-grandtotal" readonly style="width:200px; background:var(--emerald-100); color:var(--emerald-900); font-weight:bold;"></div>
-        <button class="btn btn-primary" style="margin-top:20px;" onclick="generatePO()">Generate Official PO</button>
+        <button class="btn btn-primary" style="margin-top:20px;" onclick="generatePO()">Submit Purchase Order</button>
       </div>
     </div>
   </div>
@@ -120,15 +125,13 @@
   <!-- ADMIN CONTROL -->
   <div class="content" id="tab-admin">
     <div class="grid-2">
-      <!-- DEPARTMENTS -->
       <div class="card">
         <h2 style="margin-bottom:15px;">Manage Departments</h2>
         <div class="field"><label>Department Name</label><input id="new-dept-name" placeholder="e.g. Gold Jewellery"></div>
-        <div class="field"><label>PO Code Prefix</label><input id="new-dept-code" placeholder="e.g. GOLD (Makes PJE_GOLD_PO_001)"></div>
+        <div class="field"><label>PO Code Prefix</label><input id="new-dept-code" placeholder="e.g. GOLD"></div>
         <button class="btn btn-primary" onclick="addDepartment()">Add Department</button>
         <table style="margin-top:20px;"><thead><tr><th>Name</th><th>Code</th></tr></thead><tbody id="dept-list"></tbody></table>
       </div>
-      <!-- VENDORS -->
       <div class="card">
         <h2 style="margin-bottom:15px;">Manage Vendors</h2>
         <div class="field"><label>Vendor Name</label><input id="new-ven-name"></div>
@@ -140,7 +143,6 @@
         <table style="margin-top:20px;"><thead><tr><th>Vendor</th><th>GSTIN</th></tr></thead><tbody id="ven-list"></tbody></table>
       </div>
     </div>
-    <!-- USERS -->
     <div class="card">
       <h2 style="margin-bottom:15px;">Manage Users</h2>
       <div class="grid-3">
@@ -156,7 +158,7 @@
 
 <script>
 // ==========================================
-// 1. SUPABASE CREDENTIALS INTEGRATED
+// 1. SUPABASE CREDENTIALS 
 // ==========================================
 const SUPABASE_URL = "https://zgaprxfnzzkoqyjdyysn.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnYXByeGZuenprb3F5amR5eXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5MTc2MjQsImV4cCI6MjEwMTQ5MzYyNH0.-LPM2g8jYgVlcgY0uSK1EcZ8LBFsYrZqpez_JML26MQ";
@@ -165,7 +167,6 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 let DEPARTMENTS = [];
 let VENDORS = [];
-window.allPOs = []; // Store POs globally for the PDF downloader
 
 // ==========================================
 // 2. AUTHENTICATION & NAVIGATION
@@ -182,7 +183,7 @@ async function login() {
     document.getElementById('user-badge').innerText = `${data.name} (${data.role.toUpperCase()})`;
     if(data.role === 'admin') document.getElementById('admin-tab').style.display = 'block';
     loadData();
-    addPORow(); // Setup initial PO row
+    addPORow(); 
   } else {
     alert("Invalid login.");
   }
@@ -201,43 +202,50 @@ function switchTab(tabId) {
 // 3. LOAD CORE DATA
 // ==========================================
 async function loadData() {
-  // Load Departments
   const { data: depts } = await supabaseClient.from('po_departments').select('*').order('name');
   DEPARTMENTS = depts || [];
   document.getElementById('po-dept').innerHTML = DEPARTMENTS.map(d => `<option value="${d.code}">${d.name} (${d.code})</option>`).join('');
   document.getElementById('dept-list').innerHTML = DEPARTMENTS.map(d => `<tr><td>${d.name}</td><td class="mono">${d.code}</td></tr>`).join('');
 
-  // Load Vendors
   const { data: vens } = await supabaseClient.from('po_vendors').select('*').order('name');
   VENDORS = vens || [];
   document.getElementById('po-vendor').innerHTML = VENDORS.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
   document.getElementById('ven-list').innerHTML = VENDORS.map(v => `<tr><td>${v.name}</td><td>${v.gstin || '-'}</td></tr>`).join('');
 
-  // Load Users (Admin only)
   if (currentUser.role === 'admin') {
     const { data: users } = await supabaseClient.from('po_users').select('*');
     document.getElementById('user-list').innerHTML = (users||[]).map(u => `<tr><td>${u.name}</td><td>${u.username}</td><td>${u.role}</td></tr>`).join('');
   }
 
   // Load Dashboard POs
-  const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name, phone, gstin)').order('created_at', { ascending: false });
-  window.allPOs = pos || []; // Save globally so the PDF function can access them securely
-  
-  document.getElementById('po-list').innerHTML = (pos||[]).map(po => `
-    <tr>
-      <td class="mono" style="font-weight:bold; color:var(--emerald-800);">${po.po_number}</td>
-      <td>${new Date(po.created_at).toLocaleDateString()}</td>
-      <td>${po.department_code}</td>
-      <td>${po.po_vendors ? po.po_vendors.name : 'Unknown'}</td>
-      <td>₹ ${po.grand_total.toLocaleString()}</td>
-      <td>
-        <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" onclick="downloadPDF('${po.id}')">
-          Download PDF
-        </button>
-      </td>
-    </tr>
-  `).join('');
-} // <-- This closing bracket was missing!
+  const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name)').order('created_at', { ascending: false });
+  document.getElementById('po-list').innerHTML = (pos||[]).map(po => {
+    // Generate Badges based on status
+    const isPending = po.approval_status === 'Pending';
+    const badgeClass = isPending ? 'badge pending' : 'badge approved';
+    const trackingStr = `Status: ${po.po_status || 'Open'}<br>Payment: ${po.payment_status || 'Not Paid'}`;
+    
+    // Safely parse JSON items for PDF rendering later
+    const poString = JSON.stringify(po).replace(/'/g, "&#39;"); 
+    
+    return `
+      <tr>
+        <td class="mono" style="font-weight:bold; color:var(--emerald-800);">${po.po_number}</td>
+        <td>${new Date(po.created_at).toLocaleDateString()}</td>
+        <td>${po.department_code}</td>
+        <td>${po.po_vendors ? po.po_vendors.name : 'Unknown'}</td>
+        <td>₹ ${po.grand_total ? po.grand_total.toLocaleString() : '0'}</td>
+        <td><span class="${badgeClass}">${po.approval_status || 'N/A'}</span></td>
+        <td style="font-size:11px; color:#666;">${trackingStr}</td>
+        <td>
+          <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" onclick='downloadPDF(${poString})'>
+            Download PDF
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
 
 // ==========================================
 // 4. ADMIN FUNCTIONS
@@ -313,156 +321,217 @@ function calculateGrandTotal() {
 async function generatePO() {
   const deptCode = document.getElementById('po-dept').value;
   const vendorId = document.getElementById('po-vendor').value;
-  const subtotal = document.getElementById('po-subtotal').value;
-  const gst = document.getElementById('po-gst').value;
-  const grandTotal = document.getElementById('po-grandtotal').value;
+  const subtotal = parseFloat(document.getElementById('po-subtotal').value) || 0;
+  const gst = parseFloat(document.getElementById('po-gst').value) || 0;
+  const grandTotal = parseFloat(document.getElementById('po-grandtotal').value) || 0;
 
   if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
 
+  // Gather Line Items
   const items = [];
   document.querySelectorAll('.po-item-row').forEach(row => {
     items.push({
-      name: row.querySelector('.i-name').value,
+      description: row.querySelector('.i-name').value,
       purity: row.querySelector('.i-purity').value,
-      weight: row.querySelector('.i-weight').value,
-      qty: row.querySelector('.i-qty').value,
-      rate: row.querySelector('.i-rate').value,
-      total: row.querySelector('.i-total').value
+      weight: parseFloat(row.querySelector('.i-weight').value) || 0,
+      qty: parseFloat(row.querySelector('.i-qty').value) || 0,
+      rate: parseFloat(row.querySelector('.i-rate').value) || 0,
+      total: parseFloat(row.querySelector('.i-total').value) || 0
     });
   });
 
-  if(items.length === 0 || items[0].name === "") return alert("Add at least one item.");
+  if(items.length === 0 || !items[0].description) return alert("Add at least one item description.");
 
+  // Calculate Net Amount (Qty * Rate, excluding GST)
+  const currentPoNetAmount = subtotal; 
+
+  // 1. Get the Start and End Dates of the Current Month
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+
+  // 2. Fetch all POs for this department in the current month to check budget
+  const { data: monthlyPOs, error: fetchError } = await supabaseClient
+    .from('purchase_orders')
+    .select('net_amount')
+    .eq('department_code', deptCode)
+    .gte('created_at', startOfMonth)
+    .lte('created_at', endOfMonth);
+
+  if (fetchError) return alert("Error checking monthly limits: " + fetchError.message);
+
+  // 3. Calculate Cumulative Total
+  const previousMonthlyTotal = monthlyPOs.reduce((sum, po) => sum + (Number(po.net_amount) || 0), 0);
+  const projectedMonthlyTotal = previousMonthlyTotal + currentPoNetAmount;
+
+  // 4. Evaluate Approval Logic (Limit: 5000 cumulatively)
+  let approvalStatus = 'Pending';
+  let approverSignature = null;
+
+  if (projectedMonthlyTotal <= 5000) {
+    approvalStatus = 'Auto-Approved';
+    approverSignature = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png'; 
+  }
+
+  // Auto-Generate PO Number
   const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
-  
-  const seqNumber = String((count || 0) + 1).padStart(4, '0'); 
+  const seqNumber = String((count || 0) + 1).padStart(4, '0');
   const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
 
-  const { error } = await supabaseClient.from('purchase_orders').insert({
-    po_number: finalPONumber,
-    department_code: deptCode,
-    vendor_id: vendorId,
-    items: items,
-    subtotal: subtotal,
-    gst: gst,
-    grand_total: grandTotal,
-    created_by: currentUser.name
-  });
+  // 5. Insert PO into Supabase (Includes JSON array for easy PDF rendering later)
+  const { data: po, error: poError } = await supabaseClient
+    .from('purchase_orders')
+    .insert([{
+      po_number: finalPONumber,
+      department_code: deptCode,
+      vendor_id: vendorId,
+      items: items, 
+      subtotal: subtotal,
+      gst: gst,
+      grand_total: grandTotal,
+      net_amount: currentPoNetAmount,
+      approval_status: approvalStatus,
+      approver_signature: approverSignature,
+      po_status: 'Open',
+      payment_status: 'Not Paid',
+      created_by: currentUser.name
+    }])
+    .select()
+    .single();
 
-  if (error) {
-    alert("Error creating PO: " + error.message);
-  } else {
-    alert(`Success! Purchase Order ${finalPONumber} generated.`);
-    document.getElementById('po-items-body').innerHTML = ''; 
-    addPORow();
-    loadData(); 
-    switchTab('tab-dashboard');
-  }
+  if (poError) return alert("Error creating PO: " + poError.message);
+
+  // 6. Insert Items into the po_items table for receiving workflow
+  const itemsToInsert = items.map(item => ({
+    po_id: po.id,
+    description: item.description,
+    rate: item.rate,
+    ordered_qty: item.qty, 
+    received_qty: 0 
+  }));
+  
+  // Notice we catch errors silently here incase the po_items table wasn't created properly yet
+  await supabaseClient.from('po_items').insert(itemsToInsert).catch(e => console.warn("Items tracking skipped:", e));
+
+  alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
+  
+  document.getElementById('po-items-body').innerHTML = ''; 
+  addPORow();
+  loadData(); 
+  switchTab('tab-dashboard');
 }
 
 // ==========================================
-// 6. PDF GENERATION
+// 6. DYNAMIC PDF GENERATION (FIT TO PAGE)
 // ==========================================
-function downloadPDF(poId) {
-  // Find the exact PO from the global array
-  const po = window.allPOs.find(p => p.id === poId);
-  if(!po) return alert("Error finding PO data.");
-
-  const invoiceHTML = `
-    <div id="invoice-template" style="padding: 40px; font-family: 'Inter', sans-serif; color: #1B1B18; width: 800px; background: white;">
-      <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #0F4C3A; padding-bottom: 20px; margin-bottom: 30px;">
-        <div>
-          <h1 style="margin: 0; color: #0F4C3A; font-family: 'Playfair Display', serif; font-size: 28px;">Panna Jewellers Exclusive</h1>
-          <p style="margin: 5px 0 0; font-size: 14px; color: #6B6558;">Jade Arcade, Paradise Circle, 1&2, M.G Road</p>
-          <p style="margin: 0; font-size: 14px; color: #6B6558;">Phone: 070365 92020</p>
-        </div>
-        <div style="text-align: right;">
-          <h2 style="margin: 0; color: #C9A227; font-family: 'Playfair Display', serif;">PURCHASE ORDER</h2>
-          <p style="margin: 5px 0 0; font-weight: bold; font-size: 16px;">${po.po_number}</p>
-          <p style="margin: 0; font-size: 14px; color: #6B6558;">Date: ${new Date(po.created_at).toLocaleDateString()}</p>
-        </div>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
-        <div>
-          <h3 style="margin: 0 0 10px; font-size: 14px; color: #6B6558; text-transform: uppercase;">Vendor Details:</h3>
-          <p style="margin: 0; font-weight: bold; font-size: 16px;">${po.po_vendors ? po.po_vendors.name : 'Unknown'}</p>
-          <p style="margin: 0; font-size: 14px;">Phone: ${po.po_vendors ? po.po_vendors.phone : 'N/A'}</p>
-          <p style="margin: 0; font-size: 14px;">GSTIN: ${po.po_vendors ? po.po_vendors.gstin : 'N/A'}</p>
-        </div>
-        <div style="text-align: right;">
-          <h3 style="margin: 0 0 10px; font-size: 14px; color: #6B6558; text-transform: uppercase;">Department:</h3>
-          <p style="margin: 0; font-weight: bold; font-size: 16px;">${po.department_code}</p>
-          <p style="margin: 0; font-size: 14px;">Created By: ${po.created_by}</p>
-        </div>
-      </div>
-
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-        <thead>
-          <tr style="background: #0F4C3A; color: #FAF7EF; text-align: left;">
-            <th style="padding: 12px; border:none; color:white;">Item Description</th>
-            <th style="padding: 12px; border:none; color:white;">Purity</th>
-            <th style="padding: 12px; border:none; color:white;">Weight</th>
-            <th style="padding: 12px; border:none; color:white;">Qty</th>
-            <th style="padding: 12px; border:none; color:white;">Rate</th>
-            <th style="padding: 12px; text-align: right; border:none; color:white;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${po.items.map(item => `
-            <tr style="border-bottom: 1px solid #E4DCC8;">
-              <td style="padding: 12px; border:none;">${item.name}</td>
-              <td style="padding: 12px; border:none;">${item.purity || '-'}</td>
-              <td style="padding: 12px; border:none;">${item.weight}</td>
-              <td style="padding: 12px; border:none;">${item.qty}</td>
-              <td style="padding: 12px; border:none;">₹${item.rate}</td>
-              <td style="padding: 12px; text-align: right; font-weight: bold; border:none;">₹${item.total}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-
-      <div style="display: flex; justify-content: flex-end;">
-        <table style="width: 300px; border-collapse: collapse; border:none;">
-          <tr>
-            <td style="padding: 8px; font-size: 14px; border:none;">Subtotal:</td>
-            <td style="padding: 8px; text-align: right; font-size: 14px; border:none;">₹${po.subtotal}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; font-size: 14px; border:none;">GST:</td>
-            <td style="padding: 8px; text-align: right; font-size: 14px; border:none;">${po.gst}%</td>
-          </tr>
-          <tr style="border-top: 2px solid #0F4C3A;">
-            <td style="padding: 12px; font-weight: bold; font-size: 16px; border:none;">Grand Total:</td>
-            <td style="padding: 12px; text-align: right; font-weight: bold; font-size: 18px; color: #0F4C3A; border:none;">₹${po.grand_total}</td>
-          </tr>
-        </table>
-      </div>
-      
-      <div style="margin-top: 80px; display: flex; justify-content: space-between;">
-        <div style="border-top: 1px solid #1B1B18; padding-top: 10px; width: 200px; text-align: center;">Authorized Signatory</div>
-        <div style="border-top: 1px solid #1B1B18; padding-top: 10px; width: 200px; text-align: center;">Vendor Acceptance</div>
-      </div>
-    </div>
-  `;
-
+function downloadPDF(po) {
+  // Create a hidden temporary container tailored for A4 scale rendering
   const container = document.createElement('div');
-  container.innerHTML = invoiceHTML;
-  // Position it off-screen so the user doesn't see it flash while generating
+  container.id = 'temp-pdf-container';
+  container.style.width = '794px'; // Strict A4 pixel width
+  container.style.padding = '40px';
+  container.style.background = '#ffffff';
   container.style.position = 'absolute';
-  container.style.top = '-9999px';
+  container.style.left = '-9999px'; // Render off-screen
+  
+  const vendorName = po.po_vendors ? po.po_vendors.name : 'Unknown Vendor';
+  const dateStr = po.created_at ? new Date(po.created_at).toLocaleDateString() : 'N/A';
+  
+  // Build Items Rows
+  let itemsHtml = '';
+  if (po.items && Array.isArray(po.items)) {
+    po.items.forEach((item, index) => {
+      itemsHtml += `
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${index + 1}</td>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.description || item.name}</td>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.weight || '-'}</td>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">${item.qty}</td>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.rate}</td>
+          <td style="padding:10px; border-bottom:1px solid #E4DCC8;">₹${item.total}</td>
+        </tr>
+      `;
+    });
+  }
+
+  // Approval Signature Logic
+  let signatureHtml = '';
+  if (po.approval_status === 'Auto-Approved' || po.approval_status === 'Manual-Approved') {
+    signatureHtml = `
+      <div style="margin-top:50px; text-align:right;">
+        <p style="margin:0; font-weight:bold;">Authorized Signatory</p>
+        <p style="margin:5px 0 0; color:#0F4C3A; font-weight:bold;">[ ${po.approval_status.toUpperCase()} ]</p>
+      </div>`;
+  } else {
+    signatureHtml = `
+      <div style="margin-top:50px; text-align:right;">
+        <p style="margin:0; font-weight:bold;">Authorized Signatory</p>
+        <p style="margin:5px 0 0; color:#B5502D; font-weight:bold;">[ PENDING APPROVAL ]</p>
+      </div>`;
+  }
+
+  // Combine into Invoice Template
+  container.innerHTML = `
+    <h1 style="color:#0B3527; margin:0; font-family:'Playfair Display', serif;">Panna Jewellers Exclusive</h1>
+    <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
+    <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
+    
+    <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
+    
+    <div style="margin-bottom:30px;">
+      <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
+      <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
+      <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
+    </div>
+    
+    <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
+      <thead>
+        <tr style="background:#0B3527; color:#ffffff;">
+          <th style="padding:10px;">#</th>
+          <th style="padding:10px;">Item Description</th>
+          <th style="padding:10px;">Wt (g/ct)</th>
+          <th style="padding:10px;">Qty</th>
+          <th style="padding:10px;">Rate</th>
+          <th style="padding:10px;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsHtml}
+      </tbody>
+    </table>
+    
+    <div style="text-align:right; margin-top:30px; font-size:14px;">
+      <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
+      <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
+      <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
+    </div>
+    
+    ${signatureHtml}
+  `;
+  
   document.body.appendChild(container);
 
+  // PDF Download Configuration
   const opt = {
-    margin:       0.5,
+    margin:       [0.5, 0.5, 0.5, 0.5], // Top, Left, Bottom, Right margins in inches
     filename:     `${po.po_number}.pdf`,
     image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2 },
-    jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+    html2canvas:  { 
+      scale: 2, 
+      useCORS: true, 
+      scrollY: 0 
+    },
+    jsPDF:        { 
+      unit: 'in', 
+      format: 'a4', 
+      orientation: 'portrait' 
+    },
+    pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
   };
 
-  html2pdf().set(opt).from(container.firstElementChild).save().then(() => {
-    document.body.removeChild(container);
+  html2pdf().set(opt).from(container).save().then(() => {
+    // Remove the temporary HTML once the download finishes
+    document.body.removeChild(container); 
   });
 }
 </script>
