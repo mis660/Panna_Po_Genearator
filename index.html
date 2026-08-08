@@ -192,14 +192,11 @@ async function login() {
 function logout() { location.reload(); }
 
 function switchTab(tabId) {
-  // 1. Hide all content and remove active states
   document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   
-  // 2. Show the target content
   document.getElementById(tabId).classList.add('active');
   
-  // 3. Highlight the correct tab safely
   if (tabId === 'tab-dashboard') document.querySelectorAll('.tab')[0].classList.add('active');
   else if (tabId === 'tab-create-po') document.querySelectorAll('.tab')[1].classList.add('active');
   else if (tabId === 'tab-admin') document.querySelectorAll('.tab')[2].classList.add('active');
@@ -224,16 +221,14 @@ async function loadData() {
     document.getElementById('user-list').innerHTML = (users||[]).map(u => `<tr><td>${u.name}</td><td>${u.username}</td><td>${u.role}</td></tr>`).join('');
   }
 
-  // Load Dashboard POs
   const { data: pos } = await supabaseClient.from('purchase_orders').select('*, po_vendors(name)').order('created_at', { ascending: false });
   document.getElementById('po-list').innerHTML = (pos||[]).map(po => {
-    // Generate Badges based on status
     const isPending = po.approval_status === 'Pending';
     const badgeClass = isPending ? 'badge pending' : 'badge approved';
     const trackingStr = `Status: ${po.po_status || 'Open'}<br>Payment: ${po.payment_status || 'Not Paid'}`;
     
-    // Safely parse JSON items for PDF rendering later
-    const poString = JSON.stringify(po).replace(/'/g, "&#39;"); 
+    // SAFE ENCODING: Prevents quotes in JSON from breaking the button click
+    const encodedPO = encodeURIComponent(JSON.stringify(po)); 
     
     return `
       <tr>
@@ -245,7 +240,7 @@ async function loadData() {
         <td><span class="${badgeClass}">${po.approval_status || 'N/A'}</span></td>
         <td style="font-size:11px; color:#666;">${trackingStr}</td>
         <td>
-          <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" onclick='downloadPDF(${poString})'>
+          <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;" data-po="${encodedPO}" onclick="downloadPDF(this)">
             Download PDF
           </button>
         </td>
@@ -334,7 +329,6 @@ async function generatePO() {
 
   if(!deptCode || !vendorId) return alert("Select Department and Vendor.");
 
-  // Gather Line Items
   const items = [];
   document.querySelectorAll('.po-item-row').forEach(row => {
     items.push({
@@ -349,15 +343,11 @@ async function generatePO() {
 
   if(items.length === 0 || !items[0].description) return alert("Add at least one item description.");
 
-  // Calculate Net Amount (Qty * Rate, excluding GST)
   const currentPoNetAmount = subtotal; 
-
-  // 1. Get the Start and End Dates of the Current Month
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
 
-  // 2. Fetch all POs for this department in the current month to check budget
   const { data: monthlyPOs, error: fetchError } = await supabaseClient
     .from('purchase_orders')
     .select('net_amount')
@@ -367,11 +357,9 @@ async function generatePO() {
 
   if (fetchError) return alert("Error checking monthly limits: " + fetchError.message);
 
-  // 3. Calculate Cumulative Total
   const previousMonthlyTotal = monthlyPOs.reduce((sum, po) => sum + (Number(po.net_amount) || 0), 0);
   const projectedMonthlyTotal = previousMonthlyTotal + currentPoNetAmount;
 
-  // 4. Evaluate Approval Logic (Limit: 5000 cumulatively)
   let approvalStatus = 'Pending';
   let approverSignature = null;
 
@@ -379,28 +367,11 @@ async function generatePO() {
     approvalStatus = 'Auto-Approved';
     approverSignature = 'https://zgaprxfnzzkoqyjdyysn.supabase.co/storage/v1/object/public/signatures/senior_sign.png'; 
   }
-alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
-  
-  // Clear the items and reset the form
-  document.getElementById('po-items-body').innerHTML = ''; 
-  document.getElementById('po-subtotal').value = '';
-  document.getElementById('po-grandtotal').value = '';
-  addPORow();
-  
-  // Refresh dashboard data and navigate
-  loadData(); 
-  switchTab('tab-dashboard');
-}
 
-
-  // Auto-Generate PO Number
   const { count } = await supabaseClient.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('department_code', deptCode);
   const seqNumber = String((count || 0) + 1).padStart(4, '0');
   const finalPONumber = `PJE_${deptCode}_PO_${seqNumber}`;
 
-
-
-  // 5. Insert PO into Supabase (Includes JSON array for easy PDF rendering later)
   const { data: po, error: poError } = await supabaseClient
     .from('purchase_orders')
     .insert([{
@@ -423,7 +394,6 @@ alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Use
 
   if (poError) return alert("Error creating PO: " + poError.message);
 
-  // 6. Insert Items into the po_items table for receiving workflow
   const itemsToInsert = items.map(item => ({
     po_id: po.id,
     description: item.description,
@@ -432,34 +402,29 @@ alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Use
     received_qty: 0 
   }));
   
-  // Notice we catch errors silently here incase the po_items table wasn't created properly yet
   await supabaseClient.from('po_items').insert(itemsToInsert).catch(e => console.warn("Items tracking skipped:", e));
 
   alert(`Success! Purchase Order ${finalPONumber} generated.\n\nMonthly Budget Used: ₹${projectedMonthlyTotal}\nStatus: ${approvalStatus}`);
   
   document.getElementById('po-items-body').innerHTML = ''; 
+  document.getElementById('po-subtotal').value = '';
+  document.getElementById('po-grandtotal').value = '';
   addPORow();
+  
   loadData(); 
   switchTab('tab-dashboard');
 }
 
 // ==========================================
-// 6. DYNAMIC PDF GENERATION (FIT TO PAGE)
+// 6. DYNAMIC PDF GENERATION (DIRECT STRING RENDER)
 // ==========================================
-function downloadPDF(po) {
-  // Create a hidden temporary container tailored for A4 scale rendering
-  const container = document.createElement('div');
-  container.id = 'temp-pdf-container';
-  container.style.width = '794px'; // Strict A4 pixel width
-  container.style.padding = '40px';
-  container.style.background = '#ffffff';
-  container.style.position = 'absolute';
-  container.style.left = '-9999px'; // Render off-screen
+function downloadPDF(btnElement) {
+  // 1. Decode safely from the button click
+  const po = JSON.parse(decodeURIComponent(btnElement.getAttribute('data-po')));
   
   const vendorName = po.po_vendors ? po.po_vendors.name : 'Unknown Vendor';
   const dateStr = po.created_at ? new Date(po.created_at).toLocaleDateString() : 'N/A';
   
-  // Build Items Rows
   let itemsHtml = '';
   if (po.items && Array.isArray(po.items)) {
     po.items.forEach((item, index) => {
@@ -476,85 +441,72 @@ function downloadPDF(po) {
     });
   }
 
-  // Approval Signature Logic
   let signatureHtml = '';
   if (po.approval_status === 'Auto-Approved' || po.approval_status === 'Manual-Approved') {
     signatureHtml = `
       <div style="margin-top:50px; text-align:right;">
-        <p style="margin:0; font-weight:bold;">Authorized Signatory</p>
+        <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
         <p style="margin:5px 0 0; color:#0F4C3A; font-weight:bold;">[ ${po.approval_status.toUpperCase()} ]</p>
       </div>`;
   } else {
     signatureHtml = `
       <div style="margin-top:50px; text-align:right;">
-        <p style="margin:0; font-weight:bold;">Authorized Signatory</p>
+        <p style="margin:0; font-weight:bold; color:#1B1B18;">Authorized Signatory</p>
         <p style="margin:5px 0 0; color:#B5502D; font-weight:bold;">[ PENDING APPROVAL ]</p>
       </div>`;
   }
 
-  // Combine into Invoice Template
-  container.innerHTML = `
-    <h1 style="color:#0B3527; margin:0; font-family:'Playfair Display', serif;">Panna Jewellers Exclusive</h1>
-    <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
-    <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
-    
-    <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
-    
-    <div style="margin-bottom:30px;">
-      <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
-      <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
-      <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
+  // 2. Build the exact HTML string (No DOM appending needed)
+  const htmlContent = `
+    <div style="padding:40px; background:#ffffff; width:794px; box-sizing:border-box; font-family:sans-serif;">
+      <h1 style="color:#0B3527; margin:0; font-size:24px;">Panna Jewellers Exclusive</h1>
+      <p style="margin:5px 0 0; color:#6B6558;">Purchase Order: <strong style="color:#1B1B18;">${po.po_number}</strong></p>
+      <p style="margin:0; color:#6B6558;">Date: ${dateStr}</p>
+      
+      <hr style="border:0; border-top:2px solid #0B3527; margin:25px 0;">
+      
+      <div style="margin-bottom:30px;">
+        <h3 style="margin:0; color:#1B1B18;">To: ${vendorName}</h3>
+        <p style="margin:5px 0 0; color:#6B6558;">Department Code: ${po.department_code}</p>
+        <p style="margin:0; color:#6B6558;">Created By: ${po.created_by || 'System'}</p>
+      </div>
+      
+      <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
+        <thead>
+          <tr style="background:#0B3527; color:#ffffff;">
+            <th style="padding:10px;">#</th>
+            <th style="padding:10px;">Item Description</th>
+            <th style="padding:10px;">Wt (g/ct)</th>
+            <th style="padding:10px;">Qty</th>
+            <th style="padding:10px;">Rate</th>
+            <th style="padding:10px;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+      
+      <div style="text-align:right; margin-top:30px; font-size:14px;">
+        <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
+        <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
+        <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
+      </div>
+      
+      ${signatureHtml}
     </div>
-    
-    <table style="width:100%; border-collapse:collapse; margin-bottom:20px; text-align:left; font-size:14px;">
-      <thead>
-        <tr style="background:#0B3527; color:#ffffff;">
-          <th style="padding:10px;">#</th>
-          <th style="padding:10px;">Item Description</th>
-          <th style="padding:10px;">Wt (g/ct)</th>
-          <th style="padding:10px;">Qty</th>
-          <th style="padding:10px;">Rate</th>
-          <th style="padding:10px;">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itemsHtml}
-      </tbody>
-    </table>
-    
-    <div style="text-align:right; margin-top:30px; font-size:14px;">
-      <p style="margin:5px 0; color:#6B6558;">Subtotal: ₹${po.subtotal}</p>
-      <p style="margin:5px 0; color:#6B6558;">GST: ${po.gst}%</p>
-      <h3 style="margin:10px 0 0; color:#0B3527; font-size:20px;">Grand Total: ₹${po.grand_total}</h3>
-    </div>
-    
-    ${signatureHtml}
   `;
-  
-  document.body.appendChild(container);
 
-  // PDF Download Configuration
+  // 3. Render directly from string!
   const opt = {
-    margin:       [0.5, 0.5, 0.5, 0.5], // Top, Left, Bottom, Right margins in inches
+    margin:       0.5, 
     filename:     `${po.po_number}.pdf`,
     image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { 
-      scale: 2, 
-      useCORS: true, 
-      scrollY: 0 
-    },
-    jsPDF:        { 
-      unit: 'in', 
-      format: 'a4', 
-      orientation: 'portrait' 
-    },
-    pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
+    html2canvas:  { scale: 2, useCORS: true },
+    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
   };
 
-  html2pdf().set(opt).from(container).save().then(() => {
-    // Remove the temporary HTML once the download finishes
-    document.body.removeChild(container); 
-  });
+  html2pdf().set(opt).from(htmlContent).save();
 }
 </script>
 </body>
